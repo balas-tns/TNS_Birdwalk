@@ -7,7 +7,7 @@
 <title>TNS Bird Walk dashboard</title>
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Noto+Sans+Telugu:wght@700&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css">
 <style>
 /* VOICE calm field-notebook report · IDEA a society's monthly bird register · PICTURE the map of where birds were heard
    COLOUR forest green ground band, white cards, ochre accent · TYPE Manrope · LAYOUT finding first, then map, then tables */
@@ -113,7 +113,7 @@ footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:w
 <footer><span>Tirupati Nature Society · sound identification by BirdNET+ V3.0 (Lasseck, Eibl, Klinck &amp; Kahl, 2026), Apache License 2.0 · built on the BirdNET Live app (Kahl et al., 2026)</span><span id="updated"></span></footer>
 </div>
 <script src="config.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
 <script>
 new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;const h=c.closest('table').querySelector('tr');c.dataset.l=h&&h.cells[i]?h.cells[i].textContent:''}}).observe(document,{childList:true,subtree:true});
 {
@@ -125,7 +125,7 @@ const num = (v) => Number(v) || 0;
 const GROUP_COL = { 'Birds': '#1F5C43', 'Frogs & toads': '#2E7FB8', 'Insects': '#B86E00', 'Mammals': '#8A3B5C', 'Reptiles': '#6B5B2E' };
 const colour = (g) => GROUP_COL[g] || '#55635B';
 const day = (s) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-let DATA = null, SAMPLE = false, period = '30', placeF = '', showDemo = false, query = '', map = null, layer = null;
+let DATA = null, SAMPLE = false, period = '30', placeF = '', showDemo = false, query = '', map = null, mapReady = false, mapPts = [];
 
 /* ---------- sample data, shown until uploadUrl is set ---------- */
 function sample() {
@@ -223,17 +223,9 @@ function render() {
 
 function renderMap(ok) {
   const pts = ok.filter((s) => s.lat !== '' && s.lat != null && s.lon !== '' && s.lon != null).slice(-3000);
-  const useLeaflet = typeof L !== 'undefined' && !/claude/.test(location.hostname);
-  if (useLeaflet) {
-    if (!map) {
-      map = L.map('map', { scrollWheelZoom: false }).setView([13.65, 79.42], 11);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
-    }
-    if (layer) layer.remove();
-    layer = L.layerGroup(pts.map((s) => L.circleMarker([num(s.lat), num(s.lon)], { radius: 6, color: '#fff', weight: 1.5, fillColor: colour(s.group), fillOpacity: .85 })
-      .bindPopup(`<b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i><br>${esc(s.place)} · ${esc(day(s.start))}`))).addTo(map);
-    if (pts.length) map.fitBounds(L.latLngBounds(pts.map((s) => [num(s.lat), num(s.lon)])).pad(0.15), { maxZoom: 15 });
-    return;
+  mapPts = pts;
+  if (typeof maplibregl !== 'undefined' && !/claude/.test(location.hostname)) {
+    try { return drawMapLibre(); } catch (e) { map = null; }
   }
   const el = $('#map'), W = el.clientWidth || 600, H = el.clientHeight || 400;   // simple drawn map when tiles can't load
   if (!pts.length) { el.innerHTML = '<p class="empty" style="padding:16px">No records with a location yet.</p>'; return; }
@@ -241,6 +233,36 @@ function renderMap(ok) {
   pts.forEach((s) => { a = Math.min(a, num(s.lat)); b = Math.max(b, num(s.lat)); c = Math.min(c, num(s.lon)); d = Math.max(d, num(s.lon)); });
   const k = Math.cos(((a + b) / 2) * Math.PI / 180), sc = Math.min((W - 40) / Math.max((d - c) * k, 1e-4), (H - 40) / Math.max(b - a, 1e-4));
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${pts.map((s) => `<circle cx="${(W / 2 + (num(s.lon) - (c + d) / 2) * k * sc).toFixed(1)}" cy="${(H / 2 - (num(s.lat) - (a + b) / 2) * sc).toFixed(1)}" r="5" fill="${colour(s.group)}" fill-opacity=".8" stroke="#fff" stroke-width="1.2"><title>${esc(s.common)} · ${esc(s.place)}</title></circle>`).join('')}</svg>`;
+}
+
+/* MapLibre map: free OpenFreeMap street style, no key needed. Set mapStyle in config.js to use another style. */
+function geo() {
+  return { type: 'FeatureCollection', features: mapPts.map((s) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [num(s.lon), num(s.lat)] },
+    properties: { common: s.common, sci: s.sci, place: s.place, when: day(s.start), col: colour(s.group) } })) };
+}
+function fit() {
+  if (!mapPts.length) return;
+  const b = new maplibregl.LngLatBounds();
+  mapPts.forEach((s) => b.extend([num(s.lon), num(s.lat)]));
+  map.fitBounds(b, { padding: 40, maxZoom: 15, duration: 0 });
+}
+function drawMapLibre() {
+  if (map) { if (mapReady) { map.getSource('rec').setData(geo()); fit(); } return; }
+  $('#map').innerHTML = '';
+  map = new maplibregl.Map({ container: 'map', style: C.mapStyle || 'https://tiles.openfreemap.org/styles/liberty', center: [79.42, 13.65], zoom: 10, cooperativeGestures: true, attributionControl: { compact: true } });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  map.on('error', (e) => console.warn('map', e && e.error));
+  map.on('load', () => {
+    map.addSource('rec', { type: 'geojson', data: geo() });
+    map.addLayer({ id: 'rec', type: 'circle', source: 'rec', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 4, 15, 8], 'circle-color': ['get', 'col'], 'circle-opacity': .85, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 } });
+    map.on('click', 'rec', (e) => {
+      const p = e.features[0].properties;
+      new maplibregl.Popup({ offset: 8 }).setLngLat(e.lngLat).setHTML(`<b>${esc(p.common)}</b><br><i>${esc(p.sci)}</i><br>${esc(p.place)} · ${esc(p.when)}`).addTo(map);
+    });
+    map.on('mouseenter', 'rec', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'rec', () => { map.getCanvas().style.cursor = ''; });
+    mapReady = true; fit();
+  });
 }
 
 async function decide(s, status, btn) {

@@ -29,7 +29,11 @@ window.TNS_CONFIG = {
 
   // Where "Submit to TNS" sends a walk, and where the dashboard reads from.
   // Paste the Google Apps Script web app address here (it ends in /exec), in quotes:
-  //   uploadUrl: 'https://script.google.com/macros/s/XXXXXXXX/exec',
+  //   // Dashboard map style (MapLibre). Default: OpenFreeMap 'liberty', free, no key.
+  // Other free styles: https://tiles.openfreemap.org/styles/bright or .../positron
+  mapStyle: 'https://tiles.openfreemap.org/styles/liberty',
+
+  uploadUrl: 'https://script.google.com/macros/s/XXXXXXXX/exec',
   // Leave null until it's set up; the dashboard then shows sample data.
   uploadUrl: 'https://script.google.com/macros/s/AKfycbwQpiXEyfQ38HWcZVDuKGPSVXzlKE8MtJmXRnxGJIsxPeV7atavy6vvBrcq76IUy1OGsw/exec',
 
