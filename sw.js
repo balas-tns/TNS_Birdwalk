@@ -1,12 +1,16 @@
-/* TNS Bird Walk – offline support. Change VERSION whenever you upload new app files. */
-const VERSION = 'tns-birdwalk-v2';
+/* TNS Bird Walk – offline support and updates.
+   App files: fetched fresh whenever the phone is online, so walkers get updates automatically.
+   Model files: downloaded once and kept. Change MODEL_CACHE only when you upload a new model,
+   because every phone then downloads the ~75 MB model again. */
+const VERSION = 'tns-birdwalk-v5';
+const MODEL_CACHE = 'tns-model-v1';
 const SHELL = ['./', 'index.html', 'app.js', 'worker.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== MODEL_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
   const req = e.request;
@@ -16,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   const isCdn = /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|fonts\.(googleapis|gstatic)\.com/.test(url.host);
   if (isModel || isCdn) {
     // Big or third-party files: keep a copy after the first download so walks work offline.
-    e.respondWith(caches.open(VERSION).then(async (c) => {
+    e.respondWith(caches.open(isModel ? MODEL_CACHE : VERSION).then(async (c) => {
       const hit = await c.match(req);
       if (hit) return hit;
       const res = await fetch(req);
@@ -26,7 +30,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (url.origin === location.origin) {
-    // App files: try the network first so updates arrive, fall back to the cached copy.
+    // App files: network first so updates arrive, cached copy when offline.
     e.respondWith(fetch(req).then((res) => {
       const copy = res.clone();
       caches.open(VERSION).then((c) => c.put(req, copy));

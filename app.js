@@ -16,8 +16,24 @@ const S = {
   modelMsg: '', info: null, labels: [], geoOk: false, geoAllowed: null,
   route: null, walk: null, lastWalk: null, deferredInstall: null,
   settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence }, store.get('tnsSettings', {})),
-  walks: store.get('tnsWalks', [])
+  walks: store.get('tnsWalks', []),
+  places: store.get('tnsPlaces', [])        // places added on this phone or scanned from a place QR code
 };
+const ANYWHERE = { id: 'free', name: 'Walk anywhere', meta: 'Any place, any path, any length', tag: 'Open' };
+const slug = (t) => t.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'place';
+const allRoutes = () => C.routes.concat(S.places, [ANYWHERE]);
+function addPlace(name, lat, lon) {
+  name = String(name || '').trim().slice(0, 60);
+  if (!name) return null;
+  const id = 'p-' + slug(name);
+  let p = S.places.find((x) => x.id === id);
+  if (!p) {
+    p = { id, name, meta: lat != null ? 'Added place · ' + lat.toFixed(4) + ', ' + lon.toFixed(4) : 'Added place', tag: 'Place', lat: lat != null ? +lat.toFixed(5) : null, lon: lon != null ? +lon.toFixed(5) : null };
+    S.places.push(p); store.set('tnsPlaces', S.places);
+  }
+  return p;
+}
+const placeLink = (base, p) => base + '#place-' + encodeURIComponent(p.name) + (p.lat != null ? '~' + p.lat + ',' + p.lon : '');
 const DEMO = [
   ['Asian Koel', 'Eudynamys scolopaceus', 'Birds'], ['Red-vented Bulbul', 'Pycnonotus cafer', 'Birds'],
   ['Purple-rumped Sunbird', 'Leptocoma zeylonica', 'Birds'], ['Greater Coucal', 'Centropus sinensis', 'Birds'],
@@ -57,6 +73,18 @@ window.addEventListener('hashchange', route);
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
 function route() {
   const h = location.hash.slice(1) || 'home';
+  if (h.startsWith('place-')) {
+    let name = '', lat = null, lon = null;
+    try {
+      const [n, ll] = decodeURIComponent(h.slice(6)).split('~');
+      name = n;
+      if (ll) { const [a, b] = ll.split(',').map(Number); if (isFinite(a) && isFinite(b)) { lat = a; lon = b; } }
+    } catch (e) {}
+    const p = addPlace(name, lat, lon);
+    if (p) S.route = p.id;
+    location.replace('#home');
+    return;
+  }
   if (h.startsWith('route-')) {
     const r = C.routes.find((x) => x.id === h.slice(6));
     if (r) S.route = r.id;
@@ -87,9 +115,9 @@ function renderHome() {
       <h1>Ready for a bird walk?</h1>
       <div class="stats"><div><b>${total}</b><span>walks</span></div><div><b>${species.size}</b><span>species</span></div></div>
     </section>
-    <h2>Choose a route</h2>
+    <h2>Choose a route or place</h2>
     <div style="display:flex;flex-direction:column;gap:10px">
-      ${C.routes.concat([{ id: 'free', name: 'Free walk', meta: 'Any path, any length', tag: 'Open' }]).map((r) => `
+      ${allRoutes().map((r) => `
         <button class="route" data-route="${esc(r.id)}" aria-pressed="${S.route === r.id}">
           <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F5C43" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 19c3-6 5-2 8-8s5-4 8-6"/><circle cx="4" cy="19" r="1.5"/><circle cx="20" cy="5" r="1.5"/></svg></span>
           <span style="flex:1"><b>${esc(r.name)}</b><span class="muted">${esc(r.meta)}</span></span>
@@ -97,7 +125,7 @@ function renderHome() {
         </button>`).join('')}
     </div>
     <p class="card muted">Best between 6:00 and 8:30 am. Hold the phone out of your pocket with the screen on, walk slowly, and stop for a minute every 200 m.</p>
-    <button class="btn" id="start" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}>${S.model === 'loading' ? 'Loading the bird model…' : S.route ? 'Start walk' : 'Pick a route to start'}</button>
+    <button class="btn" id="start" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}>${S.model === 'loading' ? 'Loading the bird model…' : S.route ? 'Start walk' : 'Pick a route or Walk anywhere'}</button>
     ${S.deferredInstall ? '<button class="btn alt" id="install">Install the app on this phone</button>' : ''}`;
   view.querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => { S.route = b.dataset.route; renderHome(); }));
   const st = $('#start'); if (st) st.addEventListener('click', startWalk);
@@ -109,7 +137,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.de
 /* ---------- walk ---------- */
 let audio = null, geoWatch = null, wakeLock = null, tick = null;
 async function startWalk() {
-  const r = C.routes.find((x) => x.id === S.route) || { id: 'free', name: 'Free walk' };
+  const r = allRoutes().find((x) => x.id === S.route) || ANYWHERE;
   let stream;
   try {
     const a = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
@@ -351,7 +379,7 @@ function renderResults(id) {
       }).join('') : '<p class="empty">Nothing in this group.</p>'}
     </div>
     <div style="display:flex;flex-direction:column;gap:10px" class="noprint">
-      ${C.uploadUrl ? '<button class="btn" id="submit">Submit to TNS</button>' : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
+      ${C.uploadUrl ? (w.submitted ? '<p class="banner">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
       <div class="row"><button class="btn alt small" id="dlJson">Download walk data</button><button class="btn alt small" id="dlGpx">Download route (GPX)</button></div>
       <button class="btn alt small" id="del">Delete this walk</button>
     </div>`;
@@ -369,9 +397,14 @@ function renderResults(id) {
   if (sub) sub.addEventListener('click', async () => {
     sub.disabled = true; sub.textContent = 'Sending…';
     try {
-      const r = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(w) });
-      sub.textContent = r.ok ? 'Sent to TNS' : 'Not sent (server said ' + r.status + ')';
-    } catch (e) { sub.textContent = 'Not sent: no connection. Try again later.'; sub.disabled = false; }
+      // text/plain keeps this a "simple" request, which Google Apps Script accepts from any website
+      const r = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(w) });
+      let j = {}; try { j = await r.json(); } catch (e) {}
+      if (r.ok && j.ok !== false) {
+        w.submitted = Date.now(); store.set('tnsWalks', S.walks);
+        sub.textContent = j.duplicate ? 'Already sent to TNS' : 'Sent to TNS. Thank you!';
+      } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; }
+    } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; }
   });
 }
 function download(name, text, type) {
@@ -429,6 +462,15 @@ async function renderMore() {
     <h2>Route QR codes</h2>
     <p class="muted">Print these and put each one at its start point. Scanning opens the app with that route already picked.</p>
     <div class="qrs">${C.routes.map((r) => `<div class="qr">${qrSvg(base + '#route-' + r.id, 4)}<b style="font-size:13px">${esc(r.name)}</b></div>`).join('')}</div>
+    ${S.places.length ? `<h2>Place QR codes</h2><div class="qrs">${S.places.map((p) => `<div class="qr">${qrSvg(placeLink(base, p), 4)}<b style="font-size:13px">${esc(p.name)}</b><button class="chip noprint" data-delplace="${esc(p.id)}">Remove</button></div>`).join('')}</div>` : ''}
+    <div class="card noprint" style="display:flex;flex-direction:column;gap:10px">
+      <b>Enable a new place</b>
+      <p class="muted">Type a place name to make its QR code. Anyone who scans it gets that place on their Home screen, ready to walk. Stand at the place and tick the box to save its location too.</p>
+      <label class="f">Place name<input id="plName" maxlength="60" placeholder="e.g. Talakona waterfall trail"></label>
+      <label style="display:flex;gap:10px;align-items:center;font-size:14px"><input type="checkbox" id="plHere" style="width:22px;height:22px;accent-color:#1F5C43"> Use my current location as the start point</label>
+      <button class="btn small" id="plAdd">Create QR code</button>
+      <p class="muted hide" id="plMsg"></p>
+    </div>
     <button class="btn alt small noprint" id="print">Print QR codes</button>
     <h2 class="noprint">Settings</h2>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:14px">
@@ -436,6 +478,7 @@ async function renderMore() {
       <label class="f">Microphone<select id="mic"><option value="">Phone's built-in mic</option></select></label>
       <label class="f">Minimum confidence: <span id="mcv">${Math.round(S.settings.minConfidence * 100)}%</span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}"></label>
     </div>
+    <a class="btn alt small noprint" href="dashboard.html" target="_blank" rel="noopener">Open the community dashboard</a>
     <div class="card noprint"><b>Model</b><p class="muted">${esc(modelText())}</p></div>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:8px">
       <b>Credits</b>
@@ -445,6 +488,23 @@ async function renderMore() {
     </div>
     <button class="btn alt small noprint" id="clear">Delete all walks on this phone</button>`;
   $('#print').addEventListener('click', () => window.print());
+  view.querySelectorAll('[data-delplace]').forEach((b) => b.addEventListener('click', () => {
+    S.places = S.places.filter((p) => p.id !== b.dataset.delplace); store.set('tnsPlaces', S.places);
+    if (S.route === b.dataset.delplace) S.route = null;
+    renderMore();
+  }));
+  $('#plAdd').addEventListener('click', () => {
+    const name = $('#plName').value.trim(), msg = $('#plMsg');
+    msg.classList.remove('hide');
+    if (!name) { msg.textContent = 'Type a place name first.'; return; }
+    const done = (lat, lon) => { const p = addPlace(name, lat, lon); if (p) S.route = p.id; renderMore(); };
+    if ($('#plHere').checked && 'geolocation' in navigator) {
+      msg.textContent = 'Getting your location…';
+      navigator.geolocation.getCurrentPosition((pos) => done(pos.coords.latitude, pos.coords.longitude),
+        () => { msg.textContent = 'Location not available, so the place was saved without it.'; setTimeout(() => done(null, null), 1200); },
+        { enableHighAccuracy: true, timeout: 15000 });
+    } else done(null, null);
+  });
   $('#nm').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); store.set('tnsSettings', S.settings); });
   $('#mc').addEventListener('input', (e) => { S.settings.minConfidence = +e.target.value; $('#mcv').textContent = Math.round(+e.target.value * 100) + '%'; store.set('tnsSettings', S.settings); });
   $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { S.walks = []; store.set('tnsWalks', []); renderMore(); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });

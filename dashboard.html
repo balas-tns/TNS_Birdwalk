@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1F5C43">
+<title>TNS Bird Walk dashboard</title>
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Noto+Sans+Telugu:wght@700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* VOICE calm field-notebook report · IDEA a society's monthly bird register · PICTURE the map of where birds were heard
+   COLOUR forest green ground band, white cards, ochre accent · TYPE Manrope · LAYOUT finding first, then map, then tables */
+:root{--g:#1F5C43;--g2:#143D2C;--mint:#E3EEE7;--bg:#F3F5EF;--ink:#17251E;--mut:#55635B;--och:#8A5200;--ochBg:#FCEFD8;--line:#E6EBE6;--card:#fff}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Manrope,system-ui,sans-serif;overflow-x:clip}
+a{color:var(--g)}
+header{background:var(--g);color:#fff}
+.wrap{max-width:1240px;margin:0 auto;padding:0 max(4vw,16px)}
+.top{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;justify-content:space-between;padding:18px 0}
+.brand b{font-family:'Noto Sans Telugu',Manrope,sans-serif;font-size:22px;display:block}
+.brand span{font-size:12px;font-weight:700;opacity:.9}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.seg{display:flex;background:rgba(255,255,255,.14);border-radius:12px;padding:3px}
+.seg button{all:unset;cursor:pointer;padding:8px 14px;border-radius:9px;font-size:14px;font-weight:700;color:#fff}
+.seg button[aria-pressed=true]{background:#fff;color:var(--g)}
+select,input[type=search],input[type=password]{font:inherit;font-size:16px;padding:9px 12px;border-radius:12px;border:1px solid #C9D3CC;background:#fff;color:var(--ink)}
+header select{border:0}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600}
+.chk input{width:20px;height:20px;accent-color:var(--och)}
+main{padding:26px 0 48px;display:flex;flex-direction:column;gap:20px}
+h1{font-size:clamp(26px,3.4vw,40px);line-height:1.08;margin:0;text-wrap:balance}
+h2{font-size:18px;margin:0}
+.sub{color:var(--mut);font-size:14px;margin:6px 0 0}
+.banner{background:var(--ochBg);color:#6B4000;border-radius:14px;padding:10px 14px;font-size:14px;font-weight:700}
+.banner.err{background:#FBE4E2;color:#7A1C16}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.tile{background:var(--card);border-radius:18px;padding:16px 18px}
+.tile span{display:block;font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.02em}
+.tile b{font-size:clamp(26px,3vw,34px);font-variant-numeric:tabular-nums}
+.tile small{display:block;font-size:12px;color:var(--mut)}
+.row{display:flex;flex-wrap:wrap;gap:20px}
+.card{background:var(--card);border-radius:18px;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.wide{flex:999 1 560px}.side{flex:1 1 340px}
+#map{height:430px;border-radius:14px;background:#DDE8DF;overflow:hidden;position:relative}
+#map svg{width:100%;height:100%;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--mut)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:6px;vertical-align:middle}
+.bar{display:flex;flex-direction:column;gap:3px}
+.bar div{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.bar div span:last-child{color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar em{display:block;height:8px;border-radius:4px;background:var(--mint)}
+.bar em i{display:block;height:8px;border-radius:4px;background:var(--g)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:12px;color:var(--mut);font-weight:700;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td i{color:var(--mut)}
+.pill{font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;background:var(--mint);color:var(--g);white-space:nowrap}
+.btn{all:unset;cursor:pointer;padding:9px 14px;border-radius:10px;font-size:14px;font-weight:700;background:var(--g);color:#fff;text-align:center;min-height:24px}
+.btn.alt{background:#fff;color:var(--ink);border:2px solid #C9D3CC}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--och);outline-offset:2px}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.empty{color:var(--mut);font-size:14px;padding:12px 0}
+footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 24px}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;font-size:12px;color:var(--mut)}.stack td:empty{display:none}#map{height:320px}}
+@media print{header .filters,.acts,#exportBtn{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap top">
+    <div class="brand"><b>పిట్ట పాట</b><span>TNS BIRD WALK · COMMUNITY DASHBOARD</span></div>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Period" id="period">
+        <button data-p="7" aria-pressed="false">7 days</button><button data-p="30" aria-pressed="true">30 days</button><button data-p="all" aria-pressed="false">All time</button>
+      </div>
+      <select id="place" aria-label="Place"><option value="">All places</option></select>
+      <label class="chk"><input type="checkbox" id="demo"> Include test walks</label>
+    </div>
+  </div>
+</header>
+<div class="wrap">
+<main>
+  <div id="notice"></div>
+  <div><h1 id="title">Loading the walks…</h1><p class="sub" id="subtitle"></p></div>
+  <section class="tiles" id="tiles" aria-label="Totals"></section>
+  <div class="row">
+    <section class="card wide"><h2>Where birds were heard</h2><div id="map" role="img" aria-label="Map of species records"></div><div class="legend" id="legend"></div></section>
+    <section class="card side"><h2>Most heard</h2><div id="top" style="display:flex;flex-direction:column;gap:10px"></div><p class="sub" style="margin:0">Share of walks where each species was heard.</p></section>
+  </div>
+  <section class="card">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><h2>Species list</h2>
+      <div class="acts"><input type="search" id="q" placeholder="Search species" aria-label="Search species"><button class="btn alt" id="exportBtn">Download CSV</button></div></div>
+    <div class="scroll"><table class="stack" id="spTable"></table></div>
+  </section>
+  <div class="row">
+    <section class="card side"><h2>Places</h2><div class="scroll"><table class="stack" id="places"></table></div></section>
+    <section class="card side"><h2>Walkers</h2><div class="scroll"><table class="stack" id="walkers"></table></div></section>
+  </div>
+  <div class="row">
+    <section class="card wide">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><h2>Expert review queue</h2>
+        <div class="acts"><input type="password" id="key" placeholder="Reviewer key" aria-label="Reviewer key" autocomplete="off"></div></div>
+      <p class="sub" style="margin:0">Uncertain or unexpected records. They appear in the totals only after a reviewer confirms them.</p>
+      <div class="scroll"><table class="stack" id="review"></table></div>
+    </section>
+    <section class="card side"><h2>Recent walks</h2><div class="scroll"><table class="stack" id="recent"></table></div></section>
+  </div>
+</main>
+<footer><span>Tirupati Nature Society · sound identification by BirdNET+ V3.0 (Lasseck, Eibl, Klinck &amp; Kahl, 2026), Apache License 2.0 · built on the BirdNET Live app (Kahl et al., 2026)</span><span id="updated"></span></footer>
+</div>
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;const h=c.closest('table').querySelector('tr');c.dataset.l=h&&h.cells[i]?h.cells[i].textContent:''}}).observe(document,{childList:true,subtree:true});
+{
+const C = window.TNS_CONFIG || {};
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const yes = (v) => v === true || v === 'TRUE' || v === 'true';
+const num = (v) => Number(v) || 0;
+const GROUP_COL = { 'Birds': '#1F5C43', 'Frogs & toads': '#2E7FB8', 'Insects': '#B86E00', 'Mammals': '#8A3B5C', 'Reptiles': '#6B5B2E' };
+const colour = (g) => GROUP_COL[g] || '#55635B';
+const day = (s) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+let DATA = null, SAMPLE = false, period = '30', placeF = '', showDemo = false, query = '', map = null, layer = null;
+
+/* ---------- sample data, shown until uploadUrl is set ---------- */
+function sample() {
+  let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const places = [['kapila', 'Kapila Theertham foothill trail', 13.6517, 79.4199], ['svu', 'SV University campus loop', 13.6288, 79.4192], ['lake', 'Lake edge walk', 13.6390, 79.3960], ['p-talakona', 'Talakona waterfall trail', 13.8120, 79.2130]];
+  const sp = [['Asian Koel', 'Eudynamys scolopaceus', 'Birds', .9], ['Red-vented Bulbul', 'Pycnonotus cafer', 'Birds', .85], ['Rose-ringed Parakeet', 'Psittacula krameri', 'Birds', .7], ['Purple-rumped Sunbird', 'Leptocoma zeylonica', 'Birds', .6], ['Greater Coucal', 'Centropus sinensis', 'Birds', .45], ['Common Tailorbird', 'Orthotomus sutorius', 'Birds', .4], ['Ashy Prinia', 'Prinia socialis', 'Birds', .35], ['White-throated Kingfisher', 'Halcyon smyrnensis', 'Birds', .3], ['Indian Robin', 'Copsychus fulicatus', 'Birds', .3], ['Yellow-billed Babbler', 'Argya affinis', 'Birds', .28], ['White-browed Bulbul', 'Pycnonotus luteolus', 'Birds', .25], ['Indian Peafowl', 'Pavo cristatus', 'Birds', .22], ['Jungle Myna', 'Acridotheres fuscus', 'Birds', .2], ['Black Drongo', 'Dicrurus macrocercus', 'Birds', .2], ['Coppersmith Barbet', 'Psilopogon haemacephalus', 'Birds', .18], ['Spotted Owlet', 'Athene brama', 'Birds', .1], ['Indian Pitta', 'Pitta brachyura', 'Birds', .06], ['Indian Bullfrog', 'Hoplobatrachus tigerinus', 'Frogs & toads', .15], ['Common Indian Toad', 'Duttaphrynus melanostictus', 'Frogs & toads', .12]];
+  const people = ['Lakshmi', 'Ravi', 'Asha', 'Kiran', 'Meena', 'Srinivas', ''];
+  const walks = [], species = [], now = Date.now();
+  for (let k = 0; k < 46; k++) {
+    const pl = places[Math.floor(rnd() * places.length)], start = new Date(now - rnd() * 45 * 864e5);
+    start.setHours(6, Math.floor(rnd() * 90), 0, 0);
+    const id = String(start.getTime()) + k, walker = people[Math.floor(rnd() * people.length)], km = +(1.5 + rnd() * 1.5).toFixed(2);
+    const got = sp.filter((s) => rnd() < s[3]);
+    walks.push({ walk_id: id, start: start.toISOString(), place: pl[1], route_id: pl[0], walker, km, species_count: got.length, demo: false, start_lat: pl[2], start_lon: pl[3] });
+    got.forEach((s) => {
+      const best = +(0.5 + rnd() * 0.48).toFixed(2), flagged = best < 0.7 || s[3] < 0.11;
+      species.push({ walk_id: id, start: start.toISOString(), place: pl[1], walker, common: s[0], sci: s[1], group: s[2], calls: 1 + Math.floor(rnd() * 14), best_confidence: best, flagged, status: flagged ? (rnd() < 0.5 ? 'confirmed' : 'needs review') : 'accepted', lat: +(pl[2] + (rnd() - .5) * .012).toFixed(5), lon: +(pl[3] + (rnd() - .5) * .012).toFixed(5) });
+    });
+  }
+  return { ok: true, updated: new Date().toISOString(), walks, species };
+}
+
+/* ---------- load ---------- */
+async function load() {
+  if (!C.uploadUrl) { DATA = sample(); SAMPLE = true; return; }
+  try {
+    const r = await fetch(C.uploadUrl + (C.uploadUrl.includes('?') ? '&' : '?') + 'action=data', { cache: 'no-store' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'server error');
+    DATA = j; SAMPLE = false;
+  } catch (e) {
+    DATA = sample(); SAMPLE = true;
+    $('#notice').innerHTML = '<p class="banner err">Could not reach the TNS Google Sheet (' + esc(e.message) + '). Showing sample data instead.</p>';
+  }
+}
+
+/* ---------- compute ---------- */
+function filtered() {
+  const from = period === 'all' ? 0 : Date.now() - Number(period) * 864e5;
+  const walks = DATA.walks.filter((w) => new Date(w.start).getTime() >= from && (!placeF || w.place === placeF) && (showDemo || !yes(w.demo)));
+  const ids = new Set(walks.map((w) => String(w.walk_id)));
+  const rows = DATA.species.filter((s) => ids.has(String(s.walk_id)));
+  const ok = rows.filter((s) => s.status === 'accepted' || s.status === 'confirmed');
+  return { walks, rows, ok };
+}
+function bySpecies(ok, walkCount) {
+  const m = new Map();
+  ok.forEach((s) => {
+    const k = s.sci || s.common;
+    const o = m.get(k) || { sci: s.sci, common: s.common, group: s.group, walks: new Set(), calls: 0, best: 0, last: '' };
+    o.walks.add(String(s.walk_id)); o.calls += num(s.calls); o.best = Math.max(o.best, num(s.best_confidence));
+    if (s.start > o.last) o.last = s.start;
+    m.set(k, o);
+  });
+  return [...m.values()].map((o) => Object.assign(o, { n: o.walks.size, pct: walkCount ? o.walks.size / walkCount : 0 })).sort((a, b) => b.n - a.n || b.calls - a.calls);
+}
+
+/* ---------- render ---------- */
+function render() {
+  const { walks, rows, ok } = filtered();
+  const list = bySpecies(ok, walks.length);
+  const walkers = new Set(walks.map((w) => w.walker).filter(Boolean));
+  const km = walks.reduce((a, w) => a + num(w.km), 0);
+  const queue = rows.filter((s) => s.status === 'needs review');
+  const label = period === 'all' ? 'all time' : 'the last ' + period + ' days';
+  $('#title').textContent = walks.length ? `${list.length} species heard on ${walks.length} walks` : 'No walks in this period yet';
+  $('#subtitle').textContent = `${placeF || 'All places'} · ${label}${SAMPLE ? ' · sample data' : ''}`;
+  if (SAMPLE && !$('#notice').innerHTML) $('#notice').innerHTML = '<p class="banner">Sample data. Set up the Google Sheet (SETUP-DASHBOARD.md) and put its address in config.js to see real walks.</p>';
+  $('#tiles').innerHTML = [
+    ['WALKS', walks.length, 'submitted from the app'], ['WALKERS', walkers.size, 'who gave their name'],
+    ['SPECIES', list.length, 'accepted or confirmed'], ['KM WALKED', km.toFixed(1), 'along all routes'],
+    ['TO REVIEW', queue.length, 'waiting for an expert']
+  ].map(([a, b, c]) => `<div class="tile"><span>${a}</span><b>${esc(b)}</b><small>${c}</small></div>`).join('');
+  $('#top').innerHTML = list.length ? list.slice(0, 10).map((s) => `<div class="bar"><div><span>${esc(s.common)}</span><span>${Math.round(s.pct * 100)}%</span></div><em><i style="width:${(s.pct * 100).toFixed(1)}%"></i></em></div>`).join('') : '<p class="empty">No accepted records yet.</p>';
+  renderMap(ok);
+  const q = query.toLowerCase(), shown = list.filter((s) => !q || (s.common + ' ' + s.sci).toLowerCase().includes(q));
+  $('#spTable').innerHTML = `<tr><th>Species</th><th>Group</th><th class="n">Walks</th><th class="n">Calls</th><th class="n">Best</th><th class="n">Last heard</th></tr>` +
+    (shown.length ? shown.map((s) => `<tr><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td><span class="pill" style="color:${colour(s.group)}">${esc(s.group || '—')}</span></td><td class="n">${s.n}</td><td class="n">${s.calls}</td><td class="n">${Math.round(s.best * 100)}%</td><td class="n">${esc(day(s.last))}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">No species match.</td></tr>');
+  const group = (key) => {
+    const m = new Map();
+    walks.forEach((w) => { const k = key(w); const o = m.get(k) || { k, walks: 0, km: 0, ids: new Set() }; o.walks++; o.km += num(w.km); o.ids.add(String(w.walk_id)); m.set(k, o); });
+    return [...m.values()].map((o) => Object.assign(o, { sp: new Set(ok.filter((s) => o.ids.has(String(s.walk_id))).map((s) => s.sci)).size })).sort((a, b) => b.walks - a.walks);
+  };
+  $('#places').innerHTML = `<tr><th>Place</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.place || 'Unnamed').map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
+  $('#walkers').innerHTML = `<tr><th>Walker</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.walker || 'Walkers without a name').slice(0, 15).map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
+  const qrows = queue.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 60);
+  $('#review').innerHTML = `<tr><th>Species</th><th>Walk</th><th class="n">Confidence</th><th>Decision</th></tr>` + (qrows.length ? qrows.map((s, i) => `<tr><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td>${esc(s.place)}<br><i>${esc(day(s.start))}${s.walker ? ' · ' + esc(s.walker) : ''}</i></td><td class="n">${Math.round(num(s.best_confidence) * 100)}%</td><td><div class="acts"><button class="btn" data-rv="${i}" data-st="confirmed">Confirm</button><button class="btn alt" data-rv="${i}" data-st="rejected">Reject</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty">Nothing waiting for review.</td></tr>');
+  document.querySelectorAll('[data-rv]').forEach((b) => b.addEventListener('click', () => decide(qrows[+b.dataset.rv], b.dataset.st, b)));
+  const recent = walks.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 10);
+  $('#recent').innerHTML = `<tr><th>Date</th><th>Place</th><th class="n">Species</th></tr>` + (recent.length ? recent.map((w) => `<tr><td>${esc(day(w.start))}</td><td>${esc(w.place)}${w.walker ? '<br><i>' + esc(w.walker) + '</i>' : ''}</td><td class="n">${num(w.species_count)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">No walks yet.</td></tr>');
+  const groups = [...new Set(ok.map((s) => s.group || 'Other'))];
+  $('#legend').innerHTML = groups.map((g) => `<span><i style="background:${colour(g)}"></i>${esc(g)}</span>`).join('') + `<span>${ok.filter((s) => s.lat !== '' && s.lat != null).length} records with a location</span>`;
+  $('#updated').textContent = 'Updated ' + new Date(DATA.updated).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function renderMap(ok) {
+  const pts = ok.filter((s) => s.lat !== '' && s.lat != null && s.lon !== '' && s.lon != null).slice(-3000);
+  const useLeaflet = typeof L !== 'undefined' && !/claude/.test(location.hostname);
+  if (useLeaflet) {
+    if (!map) {
+      map = L.map('map', { scrollWheelZoom: false }).setView([13.65, 79.42], 11);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    }
+    if (layer) layer.remove();
+    layer = L.layerGroup(pts.map((s) => L.circleMarker([num(s.lat), num(s.lon)], { radius: 6, color: '#fff', weight: 1.5, fillColor: colour(s.group), fillOpacity: .85 })
+      .bindPopup(`<b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i><br>${esc(s.place)} · ${esc(day(s.start))}`))).addTo(map);
+    if (pts.length) map.fitBounds(L.latLngBounds(pts.map((s) => [num(s.lat), num(s.lon)])).pad(0.15), { maxZoom: 15 });
+    return;
+  }
+  const el = $('#map'), W = el.clientWidth || 600, H = el.clientHeight || 400;   // simple drawn map when tiles can't load
+  if (!pts.length) { el.innerHTML = '<p class="empty" style="padding:16px">No records with a location yet.</p>'; return; }
+  let a = 90, b = -90, c = 180, d = -180;
+  pts.forEach((s) => { a = Math.min(a, num(s.lat)); b = Math.max(b, num(s.lat)); c = Math.min(c, num(s.lon)); d = Math.max(d, num(s.lon)); });
+  const k = Math.cos(((a + b) / 2) * Math.PI / 180), sc = Math.min((W - 40) / Math.max((d - c) * k, 1e-4), (H - 40) / Math.max(b - a, 1e-4));
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${pts.map((s) => `<circle cx="${(W / 2 + (num(s.lon) - (c + d) / 2) * k * sc).toFixed(1)}" cy="${(H / 2 - (num(s.lat) - (a + b) / 2) * sc).toFixed(1)}" r="5" fill="${colour(s.group)}" fill-opacity=".8" stroke="#fff" stroke-width="1.2"><title>${esc(s.common)} · ${esc(s.place)}</title></circle>`).join('')}</svg>`;
+}
+
+async function decide(s, status, btn) {
+  if (!s) return;
+  if (SAMPLE) { s.status = status; render(); return; }
+  const key = $('#key').value.trim();
+  if (!key) { $('#key').focus(); $('#key').placeholder = 'Enter the reviewer key first'; return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'review', key, walk_id: s.walk_id, sci: s.sci, status }) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'not saved');
+    s.status = status; render();
+  } catch (e) { btn.disabled = false; btn.textContent = 'Not saved: ' + e.message; }
+}
+
+function exportCsv() {
+  const { rows } = filtered();
+  const cols = ['walk_id', 'start', 'place', 'walker', 'common', 'sci', 'group', 'calls', 'best_confidence', 'status', 'lat', 'lon'];
+  const cell = (v) => { const t = String(v == null ? '' : v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = [cols.join(',')].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(','))).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'tns-bird-walk-records.csv';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ---------- events ---------- */
+document.querySelectorAll('#period button').forEach((b) => b.addEventListener('click', () => {
+  period = b.dataset.p; document.querySelectorAll('#period button').forEach((x) => x.setAttribute('aria-pressed', x === b)); render();
+}));
+$('#place').addEventListener('change', (e) => { placeF = e.target.value; render(); });
+$('#demo').addEventListener('change', (e) => { showDemo = e.target.checked; render(); });
+$('#q').addEventListener('input', (e) => { query = e.target.value; render(); });
+$('#exportBtn').addEventListener('click', exportCsv);
+try { const k = sessionStorage.getItem('tnsKey'); if (k) $('#key').value = k; } catch (e) {}
+$('#key').addEventListener('change', (e) => { try { sessionStorage.setItem('tnsKey', e.target.value); } catch (x) {} });
+
+load().then(() => {
+  const places = [...new Set(DATA.walks.map((w) => w.place).filter(Boolean))].sort();
+  $('#place').insertAdjacentHTML('beforeend', places.map((p) => `<option>${esc(p)}</option>`).join(''));
+  render();
+});
+}
+</script>
+</body>
+</html>

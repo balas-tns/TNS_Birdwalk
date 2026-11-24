@@ -27,8 +27,11 @@ window.TNS_CONFIG = {
   // app can still be tried end to end. Set to false for the real programme.
   demoIfNoModel: true,
 
-  // Where "Submit to TNS" sends a walk (JSON POST). Leave null until the TNS server exists.
-  uploadUrl: null,
+  // Where "Submit to TNS" sends a walk, and where the dashboard reads from.
+  // Paste the Google Apps Script web app address here (it ends in /exec), in quotes:
+  //   uploadUrl: 'https://script.google.com/macros/s/XXXXXXXX/exec',
+  // Leave null until it's set up; the dashboard then shows sample data.
+  uploadUrl: 'https://script.google.com/macros/s/AKfycbwQpiXEyfQ38HWcZVDuKGPSVXzlKE8MtJmXRnxGJIsxPeV7atavy6vvBrcq76IUy1OGsw/exec',
 
   // Fixed TNS routes. Print a QR code for each one (More > Share) and put it at the start point.
   routes: [
