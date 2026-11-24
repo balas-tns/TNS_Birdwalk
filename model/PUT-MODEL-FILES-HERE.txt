@@ -1,0 +1,13 @@
+Put the BirdNET+ V3.0 files in this folder.
+
+Download only BirdNET+_V3.0_Global_10K_BNL.zip from https://zenodo.org/records/24362980
+Unzip it and copy these three files here, renamed:
+
+  BirdNET+_V3.0_Global_10K_FP16_BNL.onnx               ->  audio.onnx
+  BirdNET+_Geomodel_V3.0.5_Global_10K_FP16_BNL.onnx    ->  geo.onnx
+  BirdNET+_V3.0_Global_10K_Labels.csv                  ->  labels.csv
+
+Names must match exactly, in lowercase.
+
+Licence: model weights under the Apache License 2.0. Follow the BirdNET acceptable use policy
+(ACCEPTABLE_USE.txt in the bundle) and keep the credits shown in the app.
