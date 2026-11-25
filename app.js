@@ -15,7 +15,7 @@ const S = {
   model: 'loading',           // loading | ready | demo | error
   modelMsg: '', info: null, labels: [], geoOk: false, geoAllowed: null,
   route: null, walk: null, lastWalk: null, deferredInstall: null,
-  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false }, store.get('tnsSettings', {})),
+  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false, lang: 'en-IN' }, store.get('tnsSettings', {})),
   walks: store.get('tnsWalks', []),
   places: store.get('tnsPlaces', [])        // places added on this phone or scanned from a place QR code
 };
@@ -33,15 +33,102 @@ function announce(msg, urgent) {            // read out by TalkBack / VoiceOver 
 let voices = [];
 function loadVoices() { try { voices = speechSynthesis.getVoices(); } catch (e) {} }
 if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+/* Spoken languages. Each phrase is a function so word order can follow the language. */
+const LANGS = { 'en-IN': 'English (Indian voice)', 'te-IN': 'తెలుగు Telugu', 'hi-IN': 'हिन्दी Hindi', 'ta-IN': 'தமிழ் Tamil' };
+const PH = {
+  'en-IN': {
+    item: (n, p) => `${n}, ${p} percent confidence`,
+    bird: (l, t) => `${l}. ${t} ${t === 1 ? 'species' : 'species'} so far.`,
+    welcome: (r) => `Welcome to TNS Bird Walk. Spoken mode is on. ${r ? 'Your route is selected. ' : ''}Find the Start walk button near the bottom of the screen.`,
+    ready: (r) => `${r} is ready. Find the Start walk button.`,
+    selected: (r) => `${r} selected. The Start walk button is below the list.`,
+    modeOn: (m) => `Spoken mode is on. The phone will speak each new bird${m ? ' and give a walk update every ' + m + ' minutes' : ''}.`,
+    started: (r) => `Walk started on ${r}. Listening for birds.`,
+    paused: () => 'Walk paused. Double-tap Resume to carry on.', resumed: () => 'Listening again.',
+    finishing: () => 'Finishing. Working out the last birds, please wait.',
+    finished: (n, l, more) => `Walk finished. ${n} species heard${l ? ': ' + l + (more ? ', and ' + more + ' more' : '') : ''}. The Submit to TNS button is below the list.`,
+    status: (o) => `${o.paused ? 'Paused. ' : ''}${o.min < 1 ? 'Less than a minute' : o.min + (o.min === 1 ? ' minute' : ' minutes')} walked, ${o.km} kilometres. ${o.n ? o.n + ' species so far. Latest: ' + o.recent + '.' : o.demo ? 'Demo mode: birds are added when you finish.' : 'No birds identified yet.'}${o.gps ? '' : ' Still waiting for GPS.'}`,
+    listItem: (n, p, c, rv) => `${n}, ${p} percent confidence, ${c} ${c === 1 ? 'call' : 'calls'}${rv ? ', under review' : ''}`,
+    list: (n, l) => `${n} species heard. ${l}.`,
+    sent: () => 'Sent to TNS. Thank you!', notSent: () => 'Not sent. Try again later.',
+    mic: () => 'Microphone permission is needed to listen for birds. Allow it and try again.'
+  },
+  'te-IN': {
+    item: (n, p) => `${n}, ${p} శాతం నమ్మకం`,
+    bird: (l, t) => `${l}. ఇప్పటివరకు ${t === 1 ? '1 జాతి' : t + ' జాతులు'}.`,
+    welcome: (r) => `TNS పిట్ట పాటకు స్వాగతం. మాటల విధానం ఆన్ అయింది. ${r ? 'మీ దారి ఎంచుకోబడింది. ' : ''}స్టార్ట్ వాక్ బటన్ స్క్రీన్ కింది భాగంలో ఉంది.`,
+    ready: (r) => `${r} సిద్ధంగా ఉంది. స్టార్ట్ వాక్ బటన్ నొక్కండి.`,
+    selected: (r) => `${r} ఎంచుకున్నారు. స్టార్ట్ వాక్ బటన్ జాబితా కింద ఉంది.`,
+    modeOn: (m) => `మాటల విధానం ఆన్ అయింది. ప్రతి కొత్త పక్షి పేరు చెబుతాను${m ? ', ప్రతి ' + m + ' నిమిషాలకు నడక వివరాలు చెబుతాను' : ''}.`,
+    started: (r) => `${r} లో నడక మొదలైంది. పక్షుల కోసం వింటున్నాను.`,
+    paused: () => 'నడక ఆపాను. కొనసాగించడానికి రెస్యూమ్ నొక్కండి.', resumed: () => 'మళ్ళీ వింటున్నాను.',
+    finishing: () => 'నడక ముగిస్తున్నాను. దయచేసి కొంచెం ఆగండి.',
+    finished: (n, l, more) => `నడక ముగిసింది. ${n} జాతులు వినిపించాయి${l ? ': ' + l + (more ? ', ఇంకా ' + more : '') : ''}. సబ్మిట్ బటన్ జాబితా కింద ఉంది.`,
+    status: (o) => `${o.paused ? 'నడక ఆగి ఉంది. ' : ''}${o.min} నిమిషాలు, ${o.km} కిలోమీటర్లు. ${o.n ? 'ఇప్పటివరకు ' + o.n + ' జాతులు. చివరిగా: ' + o.recent + '.' : 'ఇంకా ఏ పక్షీ గుర్తించలేదు.'}${o.gps ? '' : ' జీపీఎస్ కోసం ఎదురుచూస్తున్నాను.'}`,
+    listItem: (n, p, c, rv) => `${n}, ${p} శాతం నమ్మకం, ${c} సార్లు${rv ? ', పరిశీలనలో ఉంది' : ''}`,
+    list: (n, l) => `${n} జాతులు వినిపించాయి. ${l}.`,
+    sent: () => 'TNS కి పంపాను. ధన్యవాదాలు!', notSent: () => 'పంపలేకపోయాను. తర్వాత మళ్ళీ ప్రయత్నించండి.',
+    mic: () => 'పక్షులను వినడానికి మైక్రోఫోన్ అనుమతి కావాలి.'
+  },
+  'hi-IN': {
+    item: (n, p) => `${n}, ${p} प्रतिशत भरोसा`,
+    bird: (l, t) => `${l}. अब तक ${t === 1 ? '1 प्रजाति' : t + ' प्रजातियाँ'}।`,
+    welcome: (r) => `TNS बर्ड वॉक में आपका स्वागत है। बोलने वाला मोड चालू है। ${r ? 'आपका रास्ता चुना गया है। ' : ''}स्टार्ट वॉक बटन स्क्रीन के नीचे है।`,
+    ready: (r) => `${r} तैयार है। स्टार्ट वॉक बटन दबाइए।`,
+    selected: (r) => `${r} चुना गया। स्टार्ट वॉक बटन सूची के नीचे है।`,
+    modeOn: (m) => `बोलने वाला मोड चालू है। हर नए पक्षी का नाम बताऊँगा${m ? ' और हर ' + m + ' मिनट में सैर की जानकारी दूँगा' : ''}।`,
+    started: (r) => `${r} पर सैर शुरू हुई। पक्षियों को सुन रहा हूँ।`,
+    paused: () => 'सैर रोकी गई। आगे बढ़ने के लिए रिज़्यूम दबाइए।', resumed: () => 'फिर से सुन रहा हूँ।',
+    finishing: () => 'सैर पूरी कर रहा हूँ। कृपया थोड़ा रुकिए।',
+    finished: (n, l, more) => `सैर पूरी हुई। ${n} प्रजातियाँ सुनाई दीं${l ? ': ' + l + (more ? ', और ' + more : '') : ''}। सबमिट बटन सूची के नीचे है।`,
+    status: (o) => `${o.paused ? 'सैर रुकी है। ' : ''}${o.min} मिनट, ${o.km} किलोमीटर। ${o.n ? 'अब तक ' + o.n + ' प्रजातियाँ। आखिरी: ' + o.recent + '।' : 'अभी तक कोई पक्षी नहीं पहचाना।'}${o.gps ? '' : ' जीपीएस का इंतज़ार है।'}`,
+    listItem: (n, p, c, rv) => `${n}, ${p} प्रतिशत भरोसा, ${c} बार${rv ? ', जाँच में' : ''}`,
+    list: (n, l) => `${n} प्रजातियाँ सुनाई दीं। ${l}।`,
+    sent: () => 'TNS को भेज दिया। धन्यवाद!', notSent: () => 'नहीं भेज पाया। बाद में फिर कोशिश कीजिए।',
+    mic: () => 'पक्षियों को सुनने के लिए माइक्रोफ़ोन की अनुमति चाहिए।'
+  },
+  'ta-IN': {
+    item: (n, p) => `${n}, ${p} சதவீதம் நம்பிக்கை`,
+    bird: (l, t) => `${l}. இதுவரை ${t === 1 ? '1 இனம்' : t + ' இனங்கள்'}.`,
+    welcome: (r) => `TNS பறவை நடைக்கு வரவேற்கிறோம். பேசும் முறை இயக்கப்பட்டது. ${r ? 'உங்கள் பாதை தேர்ந்தெடுக்கப்பட்டது. ' : ''}ஸ்டார்ட் வாக் பொத்தான் திரையின் கீழே உள்ளது.`,
+    ready: (r) => `${r} தயார். ஸ்டார்ட் வாக் பொத்தானை அழுத்துங்கள்.`,
+    selected: (r) => `${r} தேர்ந்தெடுக்கப்பட்டது. ஸ்டார்ட் வாக் பொத்தான் பட்டியலின் கீழே உள்ளது.`,
+    modeOn: (m) => `பேசும் முறை இயக்கப்பட்டது. ஒவ்வொரு புதிய பறவையின் பெயரையும் சொல்வேன்${m ? ', ஒவ்வொரு ' + m + ' நிமிடத்துக்கும் நடை விவரம் சொல்வேன்' : ''}.`,
+    started: (r) => `${r} இல் நடை தொடங்கியது. பறவைகளைக் கேட்கிறேன்.`,
+    paused: () => 'நடை நிறுத்தப்பட்டது. தொடர ரெஸ்யூம் அழுத்துங்கள்.', resumed: () => 'மீண்டும் கேட்கிறேன்.',
+    finishing: () => 'நடையை முடிக்கிறேன். தயவுசெய்து காத்திருங்கள்.',
+    finished: (n, l, more) => `நடை முடிந்தது. ${n} இனங்கள் கேட்டன${l ? ': ' + l + (more ? ', மேலும் ' + more : '') : ''}. சப்மிட் பொத்தான் பட்டியலின் கீழே உள்ளது.`,
+    status: (o) => `${o.paused ? 'நடை நிறுத்தத்தில் உள்ளது. ' : ''}${o.min} நிமிடங்கள், ${o.km} கிலோமீட்டர். ${o.n ? 'இதுவரை ' + o.n + ' இனங்கள். கடைசியாக: ' + o.recent + '.' : 'இன்னும் பறவை எதுவும் கண்டறியப்படவில்லை.'}${o.gps ? '' : ' ஜிபிஎஸ் காத்திருக்கிறது.'}`,
+    listItem: (n, p, c, rv) => `${n}, ${p} சதவீதம் நம்பிக்கை, ${c} முறை${rv ? ', பரிசீலனையில்' : ''}`,
+    list: (n, l) => `${n} இனங்கள் கேட்டன. ${l}.`,
+    sent: () => 'TNS க்கு அனுப்பப்பட்டது. நன்றி!', notSent: () => 'அனுப்ப முடியவில்லை. பின்னர் மீண்டும் முயற்சிக்கவும்.',
+    mic: () => 'பறவைகளைக் கேட்க மைக்ரோஃபோன் அனுமதி தேவை.'
+  }
+};
+const LOCAL = {};                            // sci name -> local name, from names/<lang>.csv
+async function loadNames(lang) {
+  const code = lang.slice(0, 2); if (code === 'en' || LOCAL[code]) return;
+  LOCAL[code] = {};
+  try {
+    const t = await (await fetch('names/' + code + '.csv', { cache: 'no-cache' })).text();
+    t.split(/\r?\n/).slice(1).forEach((line) => { const c = line.split(','); if (c[0] && c[2] && c[2].trim()) LOCAL[code][c[0].trim()] = c[2].trim(); });
+  } catch (e) {}
+}
+const lang = () => (PH[S.settings.lang] ? S.settings.lang : 'en-IN');
+const nm = (s) => (LOCAL[lang().slice(0, 2)] || {})[s.sci] || s.common;     // local name if TNS has added one, else English
+const P = (k, ...a) => PH[lang()][k](...a), E = (k, ...a) => PH['en-IN'][k](...a);
 function speak(msg, force) {                // the app's own voice, for walkers who don't use a screen reader
   if (!(S.settings.voice || force) || !('speechSynthesis' in window)) return;
   try {
-    const u = new SpeechSynthesisUtterance(msg);
-    u.voice = voices.find((v) => v.lang === 'en-IN') || voices.find((v) => /^en/.test(v.lang)) || null;
-    u.lang = u.voice ? u.voice.lang : 'en-IN'; u.rate = 0.95;
+    const L = lang(), u = new SpeechSynthesisUtterance(msg);
+    u.voice = voices.find((v) => v.lang.replace('_', '-') === L) || voices.find((v) => v.lang.slice(0, 2) === L.slice(0, 2)) || null;
+    u.lang = L; u.rate = 0.95;
     speechSynthesis.speak(u);
   } catch (e) {}
 }
+function hasVoice() { const L = lang(); return !voices.length || voices.some((v) => v.lang.replace('_', '-').slice(0, 2) === L.slice(0, 2)); }
+/* say(): the screen reader gets English (it reads in the phone's own language settings), the app's voice speaks the chosen language */
+function say(key, args, urgent) { announce(E(key, ...args), urgent); speak(P(key, ...args)); }
 function tell(msg, urgent) { announce(msg, urgent); speak(msg); }
 function buzz(pattern) { if (S.settings.buzz && navigator.vibrate) try { navigator.vibrate(pattern); } catch (e) {} }
 function applyDisplay() { document.body.classList.toggle('big', !!S.settings.big); document.body.classList.toggle('hc', !!S.settings.hc); }
@@ -49,14 +136,12 @@ function saveSettings() { store.set('tnsSettings', S.settings); applyDisplay(); 
 function focusHeading() { const h = view.querySelector('h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: false }); } }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
 function spokenTime(ms) { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? 'less than a minute' : plural(m, 'minute'); }
-function walkStatus() {
+function walkStatus(local) {
   const w = S.walk; if (!w) return '';
-  const now = w.paused ? w.pausedAt : Date.now(), sp = Object.values(w.species);
-  const recent = sp.sort((a, b) => b.t - a.t).slice(0, 3).map((s) => `${s.common}, ${Math.round(s.best * 100)} percent`);
-  const last = w.track[w.track.length - 1];
-  return `${w.paused ? 'Paused. ' : ''}${spokenTime(now - w.start - w.pausedMs)} walked, ${km(w.track).toFixed(1)} kilometres. ` +
-    (sp.length ? `${plural(sp.length, 'species', 'species')} so far. Latest: ${recent.join(', ')}.` : (w.demo ? 'Demo mode: birds are added when you finish.' : 'No birds identified yet.')) +
-    (last ? '' : ' Still waiting for GPS.');
+  const now = w.paused ? w.pausedAt : Date.now(), sp = Object.values(w.species).sort((a, b) => b.t - a.t);
+  const f = local ? P : E, name = local ? nm : (s) => s.common;
+  return f('status', { paused: w.paused, min: Math.max(0, Math.round((now - w.start - w.pausedMs) / 60000)), km: km(w.track).toFixed(1), n: sp.length,
+    recent: sp.slice(0, 3).map((s) => f('item', name(s), Math.round(s.best * 100))).join(', '), demo: w.demo, gps: w.track.length > 0 });
 }
 function addPlace(name, lat, lon) {
   name = String(name || '').trim().slice(0, 60);
@@ -118,7 +203,7 @@ function route() {
       if (ll) { const [a, b] = ll.split(',').map(Number); if (isFinite(a) && isFinite(b)) { lat = a; lon = b; } }
     } catch (e) {}
     const p = addPlace(name, lat, lon);
-    if (p) { S.route = p.id; setTimeout(() => tell(p.name + ' is ready. Find the Start walk button.'), 800); }
+    if (p) { S.route = p.id; setTimeout(() => say('ready', [p.name]), 800); }
     location.replace('#home');
     return;
   }
@@ -126,12 +211,12 @@ function route() {
     Object.assign(S.settings, { voice: true, buzz: true, big: true }); saveSettings();
     const rid = h.slice(7); if (rid && allRoutes().some((x) => x.id === rid)) S.route = rid;
     location.replace('#home');
-    setTimeout(() => speak('Welcome to TNS Bird Walk. Spoken mode is on. ' + (S.route ? 'Your route is selected. ' : '') + 'Find the Start walk button near the bottom of the screen.', true), 900);
+    setTimeout(() => speak(P('welcome', !!S.route), true), 900);
     return;
   }
   if (h.startsWith('route-')) {
     const r = C.routes.find((x) => x.id === h.slice(6));
-    if (r) { S.route = r.id; setTimeout(() => tell(r.name + ' is ready. Find the Start walk button.'), 800); }
+    if (r) { S.route = r.id; setTimeout(() => say('ready', [r.name]), 800); }
     location.replace('#home');
     return;
   }
@@ -178,12 +263,12 @@ function renderHome() {
     S.route = b.dataset.route; renderHome();
     const again = view.querySelector(`[data-route="${CSS.escape(S.route)}"]`); if (again) again.focus();
     const r = allRoutes().find((x) => x.id === S.route);
-    tell((r ? r.name : 'Route') + ' selected. The Start walk button is below the list.');
+    say('selected', [r ? r.name : 'Route']);
   }));
   const on = $('#a11yOn');
   if (on) on.addEventListener('click', () => {
     Object.assign(S.settings, { voice: true, buzz: true, big: true }); saveSettings(); renderHome(); focusHeading();
-    speak('Spoken mode is on. The phone will speak each new bird and give a walk update every ' + S.settings.every + ' minutes. Change this under Share and settings.', true);
+    speak(P('modeOn', S.settings.every), true);
   });
   const st = $('#start'); if (st) st.addEventListener('click', startWalk);
   const ins = $('#install');
@@ -202,7 +287,7 @@ async function startWalk() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: a });
   } catch (e) {
     view.insertAdjacentHTML('afterbegin', '<p class="banner err">Microphone permission is needed to listen for birds. Allow it in the browser and try again.</p>');
-    tell('Microphone permission is needed to listen for birds. Allow it and try again.', true);
+    say('mic', [], true);
     return;
   }
   let ctx;
@@ -242,7 +327,7 @@ async function startWalk() {
   buzz(300);
   go('walk');
   lastSpoken = Date.now();
-  tell('Walk started on ' + r.name + '. Listening for birds.' + (S.settings.voice ? ' I will tell you each new bird.' : ''));
+  say('started', [r.name]);
 }
 function birdWeek(d) { return Math.min(48, d.getMonth() * 4 + Math.min(4, Math.ceil(d.getDate() / 7.75))); }
 async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; } }
@@ -274,8 +359,8 @@ function onWindow(m) {
     if (d.score < S.settings.minConfidence) return;
     const L = S.labels[d.i]; if (!L) return;
     w.detections.push({ i: d.i, score: +d.score.toFixed(3), t: Math.round(t), lat: loc.lat, lon: loc.lon, acc: loc.acc, est: loc.est });
-    if (!w.species[d.i]) newBird(L.common, d.score);
-    else if (S.settings.repeat && Date.now() - (w.species[d.i].said || 0) > 300000) { w.species[d.i].said = Date.now(); newBird(L.common, d.score); }
+    if (!w.species[d.i]) newBird(L, d.score);
+    else if (S.settings.repeat && Date.now() - (w.species[d.i].said || 0) > 300000) { w.species[d.i].said = Date.now(); newBird(L, d.score); }
     const sp = w.species[d.i] || (w.species[d.i] = { said: Date.now(), i: d.i, sci: L.sci, common: L.common, group: L.group, count: 0, best: 0, t: t, lat: loc.lat, lon: loc.lon, est: loc.est, clipScore: 0, clip: null });
     sp.count++;
     if (d.score > sp.best) sp.best = d.score;
@@ -283,15 +368,15 @@ function onWindow(m) {
   });
 }
 let birdQueue = [], birdTimer = null, lastSpoken = 0;
-function newBird(name, score) {              // batch birds heard within a few seconds into one sentence
-  birdQueue.push(`${name}, ${Math.round(score * 100)} percent confidence`);
+function newBird(L, score) {                 // batch birds heard within a few seconds into one sentence
+  birdQueue.push([L, Math.round(score * 100)]);
   clearTimeout(birdTimer);
   birdTimer = setTimeout(() => {
-    const n = birdQueue.length, list = birdQueue.join(', ');
-    birdQueue = [];
+    const q = birdQueue; birdQueue = [];
     const total = S.walk ? Object.keys(S.walk.species).length : n;
     buzz([120, 80, 120]);
-    tell(list + '. ' + plural(total, 'species', 'species') + ' so far.');
+    announce(E('bird', q.map(([b, p]) => E('item', b.common, p)).join(', '), total));
+    speak(P('bird', q.map(([b, p]) => P('item', nm(b), p)).join(', '), total));
     lastSpoken = Date.now();
   }, 2500);
 }
@@ -344,7 +429,7 @@ function renderWalk() {
         <button class="btn" id="finish" style="flex:1.6">Finish walk</button>
       </div>
     </div>`;
-  $('#say').addEventListener('click', () => { const t = walkStatus(); announce(t, true); speak(t); lastSpoken = Date.now(); });
+  $('#say').addEventListener('click', () => { announce(walkStatus(false), true); speak(walkStatus(true)); lastSpoken = Date.now(); });
   $('#pause').addEventListener('click', togglePause);
   $('#finish').addEventListener('click', finishWalk);
   clearInterval(tick); tick = setInterval(updateWalk, 1000); updateWalk();
@@ -362,7 +447,7 @@ function updateWalk() {
   const recent = Object.values(w.species).sort((a, b) => b.t - a.t).slice(0, 3);
   if (recent.length) $('#latest').textContent = 'Heard: ' + recent.map((s) => s.common + ' ' + Math.round(s.best * 100) + '%').join(', ');
   drawMap($('#map'), w.track, Object.values(w.species));
-  if (S.settings.voice && S.settings.every && !w.paused && Date.now() - lastSpoken > S.settings.every * 60000) { lastSpoken = Date.now(); speak(walkStatus()); }
+  if (S.settings.voice && S.settings.every && !w.paused && Date.now() - lastSpoken > S.settings.every * 60000) { lastSpoken = Date.now(); speak(walkStatus(true)); }
 }
 function togglePause() {
   const w = S.walk; if (!w) return;
@@ -370,7 +455,7 @@ function togglePause() {
   else { w.pausedMs += Date.now() - w.pausedAt; w.paused = false; w.anchors.push({ audioSec: w.sentSec, wall: Date.now() }); audio.ctx.resume(); }
   $('#pause').textContent = w.paused ? 'Resume' : 'Pause'; updateWalk();
   buzz(w.paused ? 200 : [100, 60, 100]);
-  tell(w.paused ? 'Walk paused. Double-tap Resume to carry on.' : 'Listening again.');
+  say(w.paused ? 'paused' : 'resumed', []);
 }
 async function finishWalk() {
   const w = S.walk; if (!w) return;
@@ -378,7 +463,7 @@ async function finishWalk() {
   w.active = false; w.end = Date.now();
   clearInterval(tick);
   $('#walkBtns').classList.add('hide'); $('#finishBox').classList.remove('hide');
-  tell('Finishing. Working out the last birds, please wait.');
+  say('finishing', []);
   try { audio.proc.disconnect(); audio.src.disconnect(); audio.stream.getTracks().forEach((t) => t.stop()); audio.ctx.close(); } catch (e) {}
   if (geoWatch != null) navigator.geolocation.clearWatch(geoWatch);
   try { if (wakeLock) await wakeLock.release(); } catch (e) {}
@@ -394,8 +479,11 @@ async function finishWalk() {
   S.lastWalk = w; S.walk = null;
   go('results-' + w.id);
   buzz([400, 100, 400]);
-  const names = Object.values(w.species).sort((a, b) => b.count - a.count).map((s) => `${s.common} ${Math.round(s.best * 100)} percent`);
-  setTimeout(() => tell(`Walk finished. ${plural(names.length, 'species', 'species')} heard${names.length ? ': ' + names.slice(0, 8).join(', ') + (names.length > 8 ? ', and ' + (names.length - 8) + ' more' : '') : ''}. The Submit to TNS button is below the list.`), 700);
+  const top = Object.values(w.species).sort((a, b) => b.count - a.count), n = top.length, more = Math.max(0, n - 8);
+  setTimeout(() => {
+    announce(E('finished', n, top.slice(0, 8).map((s) => E('item', s.common, Math.round(s.best * 100))).join(', '), more));
+    speak(P('finished', n, top.slice(0, 8).map((s) => P('item', nm(s), Math.round(s.best * 100))).join(', '), more));
+  }, 700);
 }
 function addDemo(w) {
   const n = 6 + Math.floor(Math.random() * 4), pick = DEMO.slice().sort(() => Math.random() - 0.5).slice(0, n);
@@ -479,9 +567,9 @@ function renderResults(id) {
   }));
   const ra = $('#readAll');
   if (ra) ra.addEventListener('click', () => {
-    const t = `${plural(w.species.length, 'species', 'species')} heard. ` + w.species.slice().sort((a, b) => b.count - a.count)
-      .map((s) => `${s.common}, ${Math.round(s.best * 100)} percent confidence, ${plural(s.count, 'call')}${s.review ? ', under review' : ''}`).join('. ') + '.';
-    if ('speechSynthesis' in window) { speechSynthesis.cancel(); speak(t, true); } else announce(t, true);
+    const sorted = w.species.slice().sort((a, b) => b.count - a.count);
+    const t = (f, name) => f('list', sorted.length, sorted.map((s) => f('listItem', name(s), Math.round(s.best * 100), s.count, s.review)).join('. '));
+    if ('speechSynthesis' in window) { speechSynthesis.cancel(); speak(t(P, nm), true); } else announce(t(E, (s) => s.common), true);
   });
   view.querySelectorAll('[data-play]').forEach((b) => b.addEventListener('click', () => {
     const c = clipFor(list[+b.dataset.play]); if (!c) return;
@@ -501,9 +589,9 @@ function renderResults(id) {
       if (r.ok && j.ok !== false) {
         w.submitted = Date.now(); store.set('tnsWalks', S.walks);
         sub.textContent = j.duplicate ? 'Already sent to TNS' : 'Sent to TNS. Thank you!';
-        tell(sub.textContent); buzz(200);
-      } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; tell(sub.textContent, true); }
-    } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; tell(sub.textContent, true); }
+        announce(sub.textContent); speak(P('sent')); buzz(200);
+      } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; announce(sub.textContent, true); speak(P('notSent')); }
+    } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; announce(sub.textContent, true); speak(P('notSent')); }
   });
 }
 function download(name, text, type) {
@@ -577,6 +665,9 @@ async function renderMore() {
     <h2 class="noprint">Accessibility</h2>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:16px">
       <label class="toggle"><input type="checkbox" id="aVoice" ${S.settings.voice ? 'checked' : ''}><span>Spoken mode<small>The phone speaks each new bird, gives walk updates and reads the results. Works alongside TalkBack.</small></span></label>
+      <label class="f">Voice language
+        <select id="aLang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${lang() === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <p class="muted hide" id="aLangMsg"></p>
       <label class="toggle"><input type="checkbox" id="aRepeat" ${S.settings.repeat ? 'checked' : ''}><span>Also say a bird again when it calls later<small>At most once every 5 minutes per bird. Off: each species is said only the first time.</small></span></label>
       <label class="f">Spoken walk update every
         <select id="aEvery"><option value="0">Never (birds only)</option>${[5, 10, 15, 20].map((n) => `<option value="${n}" ${S.settings.every === n ? 'selected' : ''}>${n} minutes</option>`).join('')}</select></label>
@@ -605,7 +696,15 @@ async function renderMore() {
   const tg = (id, key, msg) => $(id).addEventListener('change', (e) => { S.settings[key] = e.target.checked; saveSettings(); announce(msg + (e.target.checked ? ' on.' : ' off.')); if (key === 'buzz' && e.target.checked) buzz([120, 80, 120]); });
   tg('#aVoice', 'voice', 'Spoken mode'); tg('#aBuzz', 'buzz', 'Vibration'); tg('#aBig', 'big', 'Larger text'); tg('#aHc', 'hc', 'High contrast'); tg('#aRepeat', 'repeat', 'Repeat birds');
   $('#aEvery').addEventListener('change', (e) => { S.settings.every = +e.target.value; saveSettings(); });
-  $('#aTest').addEventListener('click', () => { if (!('speechSynthesis' in window)) { announce('This phone has no voice for the app. TalkBack still works.', true); return; } speak('Red-whiskered Bulbul, 85 percent confidence. 3 species so far.', true); });
+  const langMsg = () => { const m = $('#aLangMsg'); const ok = hasVoice(); m.classList.toggle('hide', ok);
+    m.textContent = ok ? '' : 'This phone has no ' + LANGS[lang()].split(' ').pop() + ' voice yet. Open phone Settings → Text-to-speech → Google → Install voice data, and download it.'; };
+  langMsg();
+  $('#aLang').addEventListener('change', async (e) => { S.settings.lang = e.target.value; saveSettings(); await loadNames(lang()); langMsg(); speak(P('item', nm({ sci: 'Eudynamys scolopaceus', common: 'Asian Koel' }), 85), true); });
+  $('#aTest').addEventListener('click', () => {
+    if (!('speechSynthesis' in window)) { announce('This phone has no voice for the app. TalkBack still works.', true); return; }
+    speechSynthesis.cancel();
+    speak(P('bird', P('item', nm({ sci: 'Pycnonotus jocosus', common: 'Red-whiskered Bulbul' }), 85), 3), true);
+  });
   view.querySelectorAll('[data-delplace]').forEach((b) => b.addEventListener('click', () => {
     S.places = S.places.filter((p) => p.id !== b.dataset.delplace); store.set('tnsPlaces', S.places);
     if (S.route === b.dataset.delplace) S.route = null;
@@ -645,6 +744,7 @@ function modelText() {
 /* ---------- start ---------- */
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 applyDisplay();
+loadNames(lang());
 startWorker();
 route();
 }
