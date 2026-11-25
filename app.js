@@ -2,7 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -201,14 +201,20 @@ function setModel(state, msg) {
   const b = $('#modelBadge');
   b.textContent = { loading: 'Loading model…', ready: 'BirdNET+ V3.0 ready', demo: 'Demo mode', error: 'Model missing' }[state];
   if (state !== 'loading' && (!location.hash || location.hash === '#home')) announce(state === 'ready' ? 'Bird model ready.' : state === 'demo' ? 'Demo mode. Results will be sample data.' : 'The bird model could not load.');
-  if (location.hash === '' || location.hash === '#home' || location.hash.startsWith('#more')) route();
+  if (location.hash === '' || location.hash === '#home' || location.hash.startsWith('#more') || location.hash === '#profile-credits') route();
 }
 
 /* ---------- routing ---------- */
 function go(h) { if (location.hash === '#' + h) route(); else location.hash = h; }
 window.addEventListener('hashchange', route);
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
-$('#profileBtn').addEventListener('click', () => go('profile'));
+/* Profile icon: opens Profile; tapping it again closes Profile and returns to the page you were on */
+let beforeProfile = 'home';
+$('#profileBtn').addEventListener('click', () => {
+  const h = location.hash.slice(1) || 'home';
+  if (h.startsWith('profile') || h === 'more') go(beforeProfile || 'home');
+  else { beforeProfile = h; go('profile'); }
+});
 /* QR pop-up in the header: tap the icon, the sharing QR code opens large */
 let qrKind = 'app';
 function drawQr() {
@@ -252,11 +258,12 @@ function route() {
   if (S.walk && S.walk.active && h !== 'walk') { location.hash = 'walk'; return; }
   const tab = (h === 'walk' || h === 'history' || h.startsWith('results')) ? 'walk' : h === 'home' ? 'home' : '';
   document.querySelectorAll('.navb').forEach((b) => b.setAttribute('aria-current', b.dataset.go === tab ? 'page' : 'false'));
-  $('#profileBtn').setAttribute('aria-current', h === 'profile' || h === 'more' ? 'page' : 'false');
-  view.classList.toggle('fit', h === 'home' || (h === 'walk' && !!S.walk));
+  $('#profileBtn').setAttribute('aria-current', h.startsWith('profile') || h === 'more' ? 'page' : 'false');
+  $('#profileBtn').setAttribute('aria-label', h.startsWith('profile') || h === 'more' ? 'Close profile' : 'Profile, settings and credits');
+  view.classList.toggle('fit', h === 'home' || (h === 'walk' && !!S.walk) || h.startsWith('results-'));
   if ((h === 'walk' || h === 'history') && !S.walk && S.recover) { location.replace('#home'); return; }   // an interrupted walk is offered on Home
   if (h === 'walk' || h === 'history') { if (S.walk) renderWalk(); else renderHistory(); }
-  else if (h === 'profile' || h === 'more') renderMore();
+  else if (h.startsWith('profile') || h === 'more') renderMore(h === 'more' ? 'profile' : h);
   else if (h.startsWith('results-')) renderResults(h.slice(8));
   else renderHome();
   fitView();
@@ -301,43 +308,74 @@ const MOTIF = (() => {                     // a fixed song-like pattern for Home
 /* ---------- voice commands for blind and low-vision walkers ----------
    "Hi TNS, let's walk" starts a walk; "TNS, let's stop" finishes it. Uses the phone's speech recognition
    (Chrome on Android). Listening restarts by itself while voice commands are on. */
-const VOICE = { ok: !!(window.SpeechRecognition || window.webkitSpeechRecognition), rec: null, on: false, retry: 0 };
+const VOICE = { ok: !!(window.SpeechRecognition || window.webkitSpeechRecognition), rec: null, on: false, retry: 0, heard: '', err: '', lock: 0, last: 0 };
+/* Phones spell "TNS" many ways ("T N S", "tennis", "DNS", "TMS", "teen s"), and "let's" often comes back as "let" or "lets".
+   Everything is folded to plain words first so the commands match whichever way the phone wrote them. */
 function norm(t) {
-  return ' ' + t.toLowerCase().replace(/[.,!?'’"]/g, '').replace(/\bt\s*n\s*s\b/g, 'tns').replace(/\b(tea|tee) and (ess|s)\b/g, 'tns').replace(/\s+/g, ' ').trim() + ' ';
+  return ' ' + t.toLowerCase().replace(/&/g, ' and ').replace(/['’]/g, '').replace(/[.,!?"\-]/g, ' ')
+    .replace(/\b(tea|tee|t) and (ess|s)\b/g, 'tns')
+    .replace(/\bt\s*n\s*s\b/g, 'tns')
+    .replace(/\b(tennis|tenis|tns|tnss|dns|tms|pns|tnc|tea ness|teen s|t ness|tienes)\b/g, 'tns')
+    .replace(/\s+/g, ' ').trim() + ' ';
 }
+const STOP_RX = /\b(let|lets|let us|lats|lads|its) (stop|finish|end)\b|\bstop\b|\bfinish\b|\bend (the |my )?walk\b/;
+const START_RX = /\b(let|lets|let us|lats|lads|its) (walk|start|go|begin)\b|\bstart\b|\bbegin\b/;
 function heardCommand(texts) {
+  if (Date.now() < VOICE.lock) return true;                 // one command at a time (interim and final results repeat it)
   for (const raw of texts) {
     const t = norm(raw);
-    const wake = / tns /.test(t);
-    if (wake && /(lets|let us|lats) (walk|start)|start (the )?walk/.test(t)) {
-      if (S.walk) { speak('The walk is already running.', true); return true; }
-      speak('Starting the walk.', true); startWalk(); return true;
-    }
-    if (wake && /(lets|let us|lats) (stop|finish|end)|stop (the )?walk|finish (the )?walk/.test(t)) {
-      if (!S.walk) { speak('No walk is running.', true); return true; }
-      speak('Stopping the walk.', true); finishWalk(); return true;
-    }
-    if (wake && /status|how (far|long)/.test(t) && S.walk) { speak(walkStatus(true), true); return true; }
-    if (wake && /repeat/.test(t) && lastSpeech) { speak(lastSpeech, true); return true; }
+    if (!/ tns /.test(t)) continue;                         // the wake word is required, so ordinary talk never stops a walk
+    const run = (fn) => { VOICE.lock = Date.now() + 4000; fn(); return true; };
+    if (STOP_RX.test(t)) return run(() => {                 // checked first: "stop the walk" also contains "walk"
+      if (!S.walk) speak('No walk is running.', true);
+      else { speak('Stopping the walk.', true); finishWalk(); }
+    });
+    if (START_RX.test(t)) return run(() => {
+      if (S.walk) speak('The walk is already running.', true);
+      else { speak('Starting the walk.', true); startWalk(); }
+    });
+    if (/status|how (far|long)/.test(t) && S.walk) return run(() => speak(walkStatus(true), true));
+    if (/repeat|again/.test(t) && lastSpeech) return run(() => speak(lastSpeech, true));
   }
   return false;
 }
+function voiceStatusText() {
+  if (!S.settings.voiceCmd) return '';
+  if (VOICE.err) return 'Voice commands paused: ' + VOICE.err;
+  return VOICE.heard ? 'Voice heard: “' + VOICE.heard + '”' : 'Say “TNS, let’s stop” to finish';
+}
+function showVoiceStatus() { const el = $('#vcStat'); if (el) el.textContent = voiceStatusText(); }
 function voiceListen() {
   if (!VOICE.ok || !S.settings.voiceCmd || VOICE.on) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const r = VOICE.rec = new SR();
-  r.lang = 'en-IN'; r.continuous = true; r.interimResults = false; r.maxAlternatives = 3;
+  r.lang = 'en-IN'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
   r.onresult = (e) => {
-    for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) heardCommand([...e.results[i]].map((a) => a.transcript));
+    VOICE.err = ''; VOICE.retry = 0;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const alts = [...e.results[i]].map((a) => a.transcript);
+      VOICE.heard = (alts[0] || '').trim().slice(-40);
+      if (heardCommand(alts)) break;
+    }
+    showVoiceStatus();
   };
   r.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { S.settings.voiceCmd = false; saveSettings(); tell('Voice commands need microphone permission. Turn them on again and allow it.', true); refreshVoiceUi(); }
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { S.settings.voiceCmd = false; saveSettings(); tell('Voice commands need microphone permission. Turn them on again and allow it.', true); refreshVoiceUi(); return; }
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    VOICE.err = e.error === 'network' ? 'no internet for speech recognition' : e.error === 'audio-capture' ? 'the microphone is busy' : e.error;
+    showVoiceStatus();
   };
-  r.onend = () => { VOICE.on = false; if (S.settings.voiceCmd && VOICE.retry < 50) { VOICE.retry++; setTimeout(voiceListen, 400); } };
-  try { r.start(); VOICE.on = true; VOICE.retry = Math.max(0, VOICE.retry - 1); } catch (e) { VOICE.on = false; }
+  r.onend = () => { VOICE.on = false; VOICE.last = Date.now(); if (S.settings.voiceCmd) setTimeout(voiceListen, Math.min(400 + VOICE.retry * 300, 3000)); VOICE.retry++; };
+  try { r.start(); VOICE.on = true; } catch (e) { VOICE.on = false; }
 }
+/* Watchdog: phones end speech recognition quietly (silence, a call, the screen dimming, recording starting).
+   Every 5 seconds, if commands are on and nothing is listening, start listening again. */
+setInterval(() => { if (S.settings.voiceCmd && VOICE.ok && !VOICE.on && Date.now() - VOICE.last > 2500) voiceListen(); }, 5000);
+/* Starting the bird recording can take the microphone away from speech recognition on some phones,
+   so listening is restarted once the recording is running. */
+function voiceRebind() { if (!S.settings.voiceCmd || !VOICE.ok) return; voiceStop(); VOICE.retry = 0; setTimeout(voiceListen, 300); }
 function voiceStop() { const r = VOICE.rec; VOICE.rec = null; VOICE.on = false; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } }
-function refreshVoiceUi() { const h = location.hash.slice(1) || 'home'; if (h === 'home') renderHome(); else if (h === 'walk' && S.walk) renderWalk(); else if (h === 'profile') renderMore(); }
+function refreshVoiceUi() { const h = location.hash.slice(1) || 'home'; if (h === 'home') renderHome(); else if (h === 'walk' && S.walk) renderWalk(); else if (h.startsWith('profile')) renderMore(h); }
 function setVoiceCmd(on) {
   S.settings.voiceCmd = on; saveSettings(); VOICE.retry = 0;
   if (on) { voiceListen(); speak(S.walk ? 'Voice commands on. Say TNS, let’s stop to finish the walk.' : 'Voice commands on. Say Hi TNS, let’s walk to start.', true); }
@@ -377,10 +415,10 @@ function renderHome() {
           ${S.route === r.id ? '<span class="tag">Selected</span>' : ''}
         </button>`).join('')}
     </div>` : ''}
-    <div class="fields">
-      <label class="f">Walk name<input id="wName" maxlength="60" list="wNames" autocomplete="off" placeholder="e.g. Talakona waterfall trail" value="${esc(S.walkName)}"></label>
+    <div class="fields2">
+      <label class="f">Walk name<input id="wName" maxlength="60" list="wNames" autocomplete="off" placeholder="e.g. Talakona trail" value="${esc(S.walkName)}"></label>
       <datalist id="wNames">${[...new Set(S.walks.map((w) => w.routeName).filter((n) => n && n !== ANYWHERE.name))].slice(0, 15).map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>
-      <label class="f"><span>Your name <span class="muted" style="font-weight:400">(optional)</span></span><input id="wWalker" maxlength="60" autocomplete="name" placeholder="Shown on the TNS dashboard" value="${esc(S.settings.name)}"></label>
+      <label class="f">Your name<input id="wWalker" maxlength="60" autocomplete="name" placeholder="Optional" value="${esc(S.settings.name)}"></label>
     </div>
     <div class="mic">
       <button class="micbtn" id="start" aria-label="Start walk" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg></button>
@@ -424,6 +462,7 @@ async function startWalk(prev) {
     const a = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
     if (S.settings.deviceId) a.deviceId = { exact: S.settings.deviceId };
     stream = await navigator.mediaDevices.getUserMedia({ audio: a });
+    setTimeout(voiceRebind, 1500);
   } catch (e) {
     view.insertAdjacentHTML('afterbegin', '<p class="banner err">Microphone permission is needed to listen for birds. Allow it in the browser and try again.</p>');
     say('mic', [], true);
@@ -635,7 +674,7 @@ function newBird(L, score) {                 // batch birds heard within a few s
   clearTimeout(birdTimer);
   birdTimer = setTimeout(() => {
     const q = birdQueue; birdQueue = [];
-    const total = S.walk ? Object.keys(S.walk.species).length : n;
+    const total = S.walk ? Object.keys(S.walk.species).length : q.length;
     buzz([120, 80, 120]);
     announce(E('bird', q.map(([b, p]) => E('item', b.common, p)).join(', '), total));
     speak(P('bird', q.map(([b, p]) => P('item', nm(b), p)).join(', '), total));
@@ -671,7 +710,7 @@ function renderWalk() {
   if (!w.sono) { w.sono = new Array(90).fill(0); w.marks = []; w.sonoN = 0; }
   view.innerHTML = `
     <div class="walkhead">
-      <div><p class="sub">${w.active ? 'Walking' : 'Finishing'}</p><h1>${esc(w.routeName)}</h1></div>
+      <div><h1>${w.routeName && w.routeName !== ANYWHERE.name ? esc(w.routeName) : w.active ? 'Walking' : 'Finishing'}</h1>${S.settings.voiceCmd ? `<p class="sub" id="vcStat" aria-hidden="true">${esc(voiceStatusText())}</p>` : ''}</div>
       <div class="wh-r"><span class="live" id="live" aria-hidden="true"><i></i><span id="liveTxt">Listening</span></span>${VOICE.ok ? `<button class="vcbtn round${S.settings.voiceCmd ? ' on' : ''}" id="vcWalk" aria-pressed="${!!S.settings.voiceCmd}" aria-label="${S.settings.voiceCmd ? 'Voice commands are on. Say TNS, let’s stop to finish.' : 'Turn on voice commands'}">${ICON.mic}</button>` : ''}</div>
     </div>
     <section class="panel" aria-hidden="true">
@@ -821,6 +860,7 @@ function saveWalk(w) {
 
 /* ---------- results ---------- */
 let resFilter = 'All', player = null;
+let resTab = 'species';
 function renderResults(id) {
   const w = S.walks.find((x) => x.id === id);
   if (!w) { view.innerHTML = '<p class="empty">That walk is no longer on this phone.</p>'; return; }
@@ -830,36 +870,53 @@ function renderResults(id) {
   const list = w.species.filter((s) => resFilter === 'All' || (resFilter === 'Under review' ? s.review : s.group === resFilter));
   const d = new Date(w.start);
   const clipFor = (s) => (CLIPS[id] || {})[s.sci] || null;
+  const nRev = w.species.filter((s) => s.review).length;
   view.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:4px"><p class="meta">${esc(w.routeName)}, ${esc(d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
-    <h1>${plural(w.species.length, 'species', 'species')} heard</h1>
-    <p class="meta">${fmt(w.end - w.start)} walked, ${w.km.toFixed(1)} km. ${w.demo ? 'Sample data from demo mode.' : 'Identified with BirdNET+ V3.0.'}</p></div>
-    ${w.demo ? '<p class="banner">Demo mode: these species are sample data, placed along your real GPS track.</p>' : ''}
-    ${w.humanWindowsRemoved ? `<p class="muted">${w.humanWindowsRemoved} stretches with human voices were discarded and never stored.</p>` : ''}
-    <div class="map" id="rmap" aria-hidden="true"></div>
-    ${w.species.length ? '<button class="btn say small noprint" id="readAll">Read the bird list aloud</button>' : ''}
-    <div class="chips" role="group" aria-label="Show only">${groups.map((g) => `<button class="chip" data-f="${esc(g)}" aria-pressed="${g === resFilter}">${esc(g)} ${g === 'All' ? w.species.length : g === 'Under review' ? w.species.filter((s) => s.review).length : w.species.filter((s) => s.group === g).length}</button>`).join('')}</div>
-    <div class="splist">
+    <div class="reshead"><div>
+      <h1>${plural(w.species.length, 'species', 'species')} heard</h1>
+      <p class="muted">${esc(w.routeName)}, ${esc(d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))}. ${fmt(w.end - w.start)}, ${w.km.toFixed(1)} km${w.demo ? '. Demo sample data' : ''}${w.humanWindowsRemoved ? `. ${w.humanWindowsRemoved} stretches with voices discarded` : ''}.</p></div>
+      ${w.species.length ? `<button class="vcbtn round" id="readAll" aria-label="Read the bird list aloud">${ICON.say}</button>` : ''}
+    </div>
+    <div class="tabs noprint" role="tablist" aria-label="Walk results">
+      <button class="tab" role="tab" id="rtabSp" aria-controls="rpaneSp" aria-selected="${resTab === 'species'}">Species <span>${w.species.length}</span></button>
+      <button class="tab" role="tab" id="rtabMap" aria-controls="rpaneMap" aria-selected="${resTab === 'map'}">Map</button>
+    </div>
+    <div class="pane${resTab === 'map' ? ' hide' : ''}" id="rpaneSp" role="tabpanel" aria-labelledby="rtabSp">
+      ${groups.length > 2 || nRev ? `<div class="chips noprint" role="group" aria-label="Show only">${groups.map((g) => `<button class="chip" data-f="${esc(g)}" aria-pressed="${g === resFilter}">${esc(g)} ${g === 'All' ? w.species.length : g === 'Under review' ? nRev : w.species.filter((s) => s.group === g).length}</button>`).join('')}</div>` : ''}
+      <div class="splist">
       ${list.length ? list.map((s, k) => {
         const c = clipFor(s);
         return `<div class="sp" role="group" aria-label="${esc(s.common)}, ${s.review ? 'under review' : Math.round(s.best * 100) + ' percent sure'}, ${plural(s.count, 'call')}">
-          <button class="play" data-play="${k}" ${c ? '' : 'disabled'} aria-label="${c ? 'Play recording of ' + esc(s.common) : 'No recording kept'}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+          <button class="play" data-play="${k}" ${c ? '' : 'disabled'} aria-label="${c ? 'Play recording of ' + esc(s.common) : 'No recording kept'}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
           <div class="nm"><b>${gdot(s.group)}${esc(s.common)}</b><i lang="la">${esc(s.sci)}</i></div>
-          <div class="rt"><span class="pill ${s.review ? 'rev' : ''}">${s.review ? 'Under review' : Math.round(s.best * 100) + '% sure'}</span><span>${s.count} ${s.count === 1 ? 'call' : 'calls'}${s.lat != null ? (s.estimated ? ', place approximate' : ', GPS place') : ''}</span></div>
+          <div class="rt"><span class="pill ${s.review ? 'rev' : ''}">${s.review ? 'Review' : Math.round(s.best * 100) + '%'}</span><span>${s.count} ${s.count === 1 ? 'call' : 'calls'}</span></div>
         </div>`;
-      }).join('') : '<p class="empty">Nothing in this group.</p>'}
+      }).join('') : `<p class="empty">${w.species.length ? 'Nothing in this group.' : 'No birds were identified on this walk.'}</p>`}
+      </div>
     </div>
-    ${w.submitted ? '' : `<div class="card noprint" style="display:flex;flex-direction:column;gap:14px">
-      <label class="f">Walk name<input id="rName" maxlength="60" value="${esc(w.routeName)}"></label>
-      <label class="f"><span>Your name <span class="muted" style="font-weight:600">(optional)</span></span><input id="rWalker" maxlength="60" autocomplete="name" value="${esc(w.walker || '')}"></label>
-      <p class="muted">You can correct these until you submit.</p>
-    </div>`}
-    <div style="display:flex;flex-direction:column;gap:10px" class="noprint">
-      ${C.uploadUrl ? (w.submitted ? '<p class="banner">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' + (!w.clipsDone && !w.demo && S.settings.sendClips ? '<button class="btn alt small" id="resendClips">Send the sound clips now</button>' : '') : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
-      <div class="row"><button class="btn alt small" id="dlJson" aria-label="Download walk data">Walk data (JSON)</button><button class="btn alt small" id="dlGpx" aria-label="Download route as GPX">Route (GPX)</button></div>
-      <button class="linkish danger" id="del">Delete this walk from the phone</button>
+    <div class="pane${resTab === 'map' ? '' : ' hide'}" id="rpaneMap" role="tabpanel" aria-labelledby="rtabMap"><div class="map" id="rmap" aria-hidden="true"></div></div>
+    <div class="resfoot noprint">
+      ${w.submitted ? '' : `<div class="fields2">
+        <label class="f">Walk name<input id="rName" maxlength="60" value="${esc(w.routeName)}"></label>
+        <label class="f">Your name<input id="rWalker" maxlength="60" autocomplete="name" placeholder="Optional" value="${esc(w.walker || '')}"></label>
+      </div>`}
+      ${C.uploadUrl ? (w.submitted ? '<p class="banner small">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' + (!w.clipsDone && !w.demo && S.settings.sendClips ? '<button class="btn alt small" id="resendClips">Send the sound clips now</button>' : '') : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
+      <details class="more"><summary>Download or delete this walk</summary>
+        <div class="row"><button class="btn alt small" id="dlJson" aria-label="Download walk data">Walk data (JSON)</button><button class="btn alt small" id="dlGpx" aria-label="Download route as GPX">Route (GPX)</button></div>
+        <button class="linkish danger" id="del">Delete this walk from the phone</button>
+      </details>
     </div>`;
-  drawMap($('#rmap'), w.track, w.species);
+  const showRes = (t) => {
+    resTab = t;
+    $('#rtabSp').setAttribute('aria-selected', t === 'species'); $('#rtabMap').setAttribute('aria-selected', t === 'map');
+    $('#rpaneSp').classList.toggle('hide', t !== 'species'); $('#rpaneMap').classList.toggle('hide', t !== 'map');
+    if (t === 'map') drawMap($('#rmap'), w.track, w.species);
+  };
+  $('#rtabSp').addEventListener('click', () => showRes('species'));
+  $('#rtabMap').addEventListener('click', () => showRes('map'));
+  const mo = view.querySelector('details.more');
+  mo.addEventListener('toggle', () => { const f = view.querySelector('.resfoot'); if (mo.open) f.classList.add('open'); else f.classList.remove('open'); });
+  if (resTab === 'map') drawMap($('#rmap'), w.track, w.species);
   view.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => {
     resFilter = b.dataset.f; renderResults(id);
     const again = view.querySelector(`[data-f="${CSS.escape(resFilter)}"]`); if (again) again.focus();
@@ -958,10 +1015,26 @@ function qrSvg(text, cell) {
   const q = qrcode(0, 'M'); q.addData(text); q.make();
   return q.createSvgTag({ cellSize: cell || 6, margin: 2, scalable: true });
 }
-async function renderMore() {
+const PF = {   // Profile pages: key → [title, parent]
+  'profile': ['Profile', null],
+  'profile-settings': ['Settings', 'profile'],
+  'profile-credits': ['Credits', 'profile'],
+  'profile-look': ['Look', 'profile-settings'],
+  'profile-speech': ['Listening and speech', 'profile-settings'],
+  'profile-voice': ['Voice commands', 'profile-settings'],
+  'profile-walks': ['Your walks', 'profile-settings'],
+  'profile-org': ['For TNS organisers', 'profile-settings'],
+};
+const CHEV = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+const navRow = (to, title, sub) => `<button class="navrow" data-pf="${to}"><span><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span>${CHEV}</button>`;
+async function renderMore(page) {
+  page = PF[page] ? page : 'profile';
+  const [title, parent] = PF[page];
+  const on = (k) => (k === page ? '' : ' hide');
   const base = location.origin + location.pathname;
   view.innerHTML = `
-    <h1>Profile</h1>
+    <div class="pfhead noprint">${parent ? `<button class="iconbtn" id="pfBack" aria-label="Back to ${PF[parent][0]}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>` : ''}<h1>${title}</h1></div>
+    <div class="pfpage${on('profile')}">
     <section class="card profile noprint">
       <span class="avatar" aria-hidden="true">${esc((S.settings.name || 'W').trim().charAt(0).toUpperCase())}</span>
       <div style="flex:1;display:flex;flex-direction:column;gap:6px">
@@ -969,12 +1042,18 @@ async function renderMore() {
         <p class="muted">${(() => { const sp = new Set(); let k = 0; S.walks.forEach((w) => { k += w.km || 0; w.species.forEach((x) => sp.add(x.sci)); }); return `${plural(S.walks.length, 'walk')}, ${plural(sp.size, 'species', 'species')} and ${k.toFixed(1)} km on this phone.`; })()}</p>
       </div>
     </section>
-    <h2 class="noprint">Look</h2>
+    <div class="group noprint">${navRow('profile-settings', 'Settings', 'Style, speech, voice commands, sound clips, QR codes')}${navRow('profile-credits', 'Credits', 'App version, bird model and acknowledgements')}</div>
+    </div>
+    <div class="pfpage${on('profile-settings')}">
+    <div class="group noprint">${navRow('profile-look', 'Look', THEMES[themeNow()])}${navRow('profile-speech', 'Listening and speech', S.settings.voice ? 'Spoken mode on' : 'Spoken mode off')}${navRow('profile-voice', 'Voice commands', S.settings.voiceCmd ? 'On' : 'Off')}${navRow('profile-walks', 'Your walks', 'Sound clips, microphone, confidence')}${navRow('profile-org', 'For TNS organisers', 'QR codes and new places')}</div>
+    <button class="linkish danger noprint" id="clear">Delete all walks on this phone</button>
+    </div>
+    <div class="pfpage${on('profile-look')}">
     <div class="group noprint">
       <label class="f">App style
         <select id="aTheme">${Object.entries(THEMES).map(([k, v]) => `<option value="${k}" ${S.settings.theme === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-    </div>
-    <h2 class="noprint">Listening and speech</h2>
+    </div></div>
+    <div class="pfpage${on('profile-speech')}">
     <div class="group noprint">
       <label class="toggle"><input type="checkbox" id="aVoice" ${S.settings.voice ? 'checked' : ''}><span>Spoken mode<small>Says each new bird, gives walk updates and reads the results. Works alongside TalkBack.</small></span></label>
       <label class="f">Voice language
@@ -987,19 +1066,19 @@ async function renderMore() {
       <label class="toggle"><input type="checkbox" id="aBig" ${S.settings.big ? 'checked' : ''}><span>Larger text and buttons</span></label>
       <label class="toggle"><input type="checkbox" id="aHc" ${S.settings.hc ? 'checked' : ''}><span>High contrast</span></label>
       <div><button class="linkish" id="aTest">Test the voice</button></div>
-    </div>
-    <h2 class="noprint">Voice commands</h2>
+    </div></div>
+    <div class="pfpage${on('profile-voice')}">
     <div class="group noprint">
       ${VOICE.ok ? `<label class="toggle"><input type="checkbox" id="aVoiceCmd" ${S.settings.voiceCmd ? 'checked' : ''}><span>Start and stop the walk by voice<small>Say “Hi TNS, let’s walk” to start and “TNS, let’s stop” to finish. “TNS, status” and “TNS, repeat” also work. The phone keeps listening while this is on.</small></span></label>` : '<p class="muted">This phone’s browser does not offer speech recognition, so voice commands are not available. Chrome on Android does.</p>'}
-    </div>
-    <h2 class="noprint">Your walks</h2>
+    </div></div>
+    <div class="pfpage${on('profile-walks')}">
     <div class="group noprint">
       <label class="toggle"><input type="checkbox" id="sClips" ${S.settings.sendClips ? 'checked' : ''}><span>Send sound clips to TNS<small>One 3-second clip per bird, so experts can check it. About 2 MB per walk. Human voices are never included.</small></span></label>
       <label class="f">Microphone<select id="mic"><option value="">Phone's built-in mic</option></select></label>
       <label class="f"><span>Minimum confidence <span id="mcv" class="muted" aria-hidden="true" style="font-weight:400">${Math.round(S.settings.minConfidence * 100)}%</span></span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}" aria-valuetext="${Math.round(S.settings.minConfidence * 100)} percent"></label>
       <div><a class="linkish" href="dashboard.html" target="_blank" rel="noopener">Open the community dashboard</a></div>
-    </div>
-    <h2>For TNS organisers</h2>
+    </div></div>
+    <div class="pfpage${on('profile-org')}">
     <p class="muted noprint">The QR icon at the top shows the sharing code at any time. These are for printing.</p>
     <div class="qr"><div>${qrSvg(base, 6)}</div><b>Scan to open TNS Bird Walk</b><span class="muted" style="word-break:break-all">${esc(base)}</span></div>
     <h2>Accessible walk QR codes</h2>
@@ -1018,15 +1097,17 @@ async function renderMore() {
       <p class="muted hide" id="plMsg"></p>
     </div>
     <button class="btn alt small noprint" id="print">Print QR codes</button>
-    <h2 class="noprint">About</h2>
+    </div>
+    <div class="pfpage${on('profile-credits')}">
     <div class="group noprint">
       <p><b>TNS Bird Walk ${APP_VERSION}</b><br><span class="muted">${plural((C.routes || []).length, 'fixed route')} set in config.js</span></p>
       <p><b>Bird model</b><br><span class="muted">${esc(modelText())}</span></p>
       <p class="muted">Sound identification by BirdNET+ V3.0 (Lasseck, Eibl, Klinck &amp; Kahl, 2026), Chemnitz University of Technology, Museum für Naturkunde Berlin and the K. Lisa Yang Center for Conservation Bioacoustics, Cornell Lab of Ornithology. Model weights: Apache License 2.0. <a href="https://doi.org/10.5281/zenodo.24362980">doi.org/10.5281/zenodo.24362980</a></p>
       <p class="muted">Built on BirdNET Live: Kahl, S., Börner, A., Mauermann, M., Seifert, R. C., Lasseck, M., Verdon, S., Wilhelm-Stein, T., Wood, C. M., Eibl, M., Müller, J. &amp; Klinck, H. (2026). <i>BirdNET Live app – Professional bioacoustics in your pocket.</i> <a href="https://github.com/birdnet-team/birdnet-live-app">github.com/birdnet-team/birdnet-live-app</a></p>
       <p class="muted">App by Tirupati Nature Society.</p>
-    </div>
-    <button class="linkish danger noprint" id="clear">Delete all walks on this phone</button>`;
+    </div></div>`;
+  view.querySelectorAll('[data-pf]').forEach((b) => b.addEventListener('click', () => go(b.dataset.pf)));
+  const bk = $('#pfBack'); if (bk) bk.addEventListener('click', () => go(parent));
   $('#print').addEventListener('click', () => window.print());
   $('#aTheme').addEventListener('change', (e) => { S.settings.theme = e.target.value; saveSettings(); announce('Style changed to ' + THEMES[e.target.value] + '.'); });
   const vc = $('#aVoiceCmd'); if (vc) vc.addEventListener('change', (e) => setVoiceCmd(e.target.checked));
@@ -1046,13 +1127,13 @@ async function renderMore() {
   view.querySelectorAll('[data-delplace]').forEach((b) => b.addEventListener('click', () => {
     S.places = S.places.filter((p) => p.id !== b.dataset.delplace); store.set('tnsPlaces', S.places);
     if (S.route === b.dataset.delplace) S.route = null;
-    renderMore();
+    renderMore(page);
   }));
   $('#plAdd').addEventListener('click', () => {
     const name = $('#plName').value.trim(), msg = $('#plMsg');
     msg.classList.remove('hide');
     if (!name) { msg.textContent = 'Type a place name first.'; return; }
-    const done = (lat, lon) => { const p = addPlace(name, lat, lon); if (p) S.route = p.id; renderMore(); };
+    const done = (lat, lon) => { const p = addPlace(name, lat, lon); if (p) S.route = p.id; renderMore(page); };
     if ($('#plHere').checked && 'geolocation' in navigator) {
       msg.textContent = 'Getting your location…';
       navigator.geolocation.getCurrentPosition((pos) => done(pos.coords.latitude, pos.coords.longitude),
@@ -1063,7 +1144,7 @@ async function renderMore() {
   $('#sClips').addEventListener('change', (e) => { S.settings.sendClips = e.target.checked; saveSettings(); announce('Sound clips ' + (e.target.checked ? 'on.' : 'off.')); });
   $('#nm').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); store.set('tnsSettings', S.settings); });
   $('#mc').addEventListener('input', (e) => { S.settings.minConfidence = +e.target.value; $('#mcv').textContent = Math.round(+e.target.value * 100) + '%'; e.target.setAttribute('aria-valuetext', Math.round(+e.target.value * 100) + ' percent'); store.set('tnsSettings', S.settings); });
-  $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { deleteClips(S.walks.map((x) => x.id)); S.walks = []; store.set('tnsWalks', []); renderMore(); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });
+  $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { deleteClips(S.walks.map((x) => x.id)); S.walks = []; store.set('tnsWalks', []); renderMore(page); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });
   const sel = $('#mic');
   try {
     const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default');
@@ -1096,3 +1177,4 @@ route();
 /* re-fit after any direct redraw of Home or Walk (voice toggle, install prompt, spoken mode) */
 renderHome = ((f) => function () { f.apply(this, arguments); fitView(); })(renderHome);
 renderWalk = ((f) => function () { f.apply(this, arguments); fitView(); })(renderWalk);
+renderResults = ((f) => function () { f.apply(this, arguments); fitView(); })(renderResults);

@@ -130,7 +130,7 @@ body.big .rb,body.big .miclbl{font-size:18px}
 .walkhead>div:first-child{flex:1;min-width:0}
 .walkhead h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wh-r{display:flex;align-items:center;gap:8px;flex:none}
-.walkhead .sub{font-size:13px;color:var(--muted)}
+.walkhead .sub{font-size:12px;color:var(--muted);margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .walkhead h1{font-size:20px}
 .live{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:700;color:var(--accInk);background:var(--turmeric);padding:6px 12px;border-radius:999px;white-space:nowrap}
 .live.off{background:var(--mist);color:var(--muted)}
@@ -223,6 +223,41 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
 /* profile */
 .profile{display:flex;align-items:center;gap:14px}
 .avatar{width:56px;height:56px;border-radius:50%;background:var(--forest);color:var(--onpri);display:grid;place-items:center;font-size:24px;font-weight:700;flex:none}
+/* compact name boxes (Home and results) */
+.fields2{flex:none;display:grid;grid-template-columns:1.25fr 1fr;gap:8px}
+.fields input,.fields2 input{min-height:38px;padding:4px 10px;font-size:16px;border-width:1.5px}
+.fields label.f,.fields2 label.f{font-size:12px;gap:2px}
+/* results: fits the screen; only the species list scrolls inside its own box */
+.reshead{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.reshead h1{font-size:20px}
+.reshead .muted{margin:2px 0 0}
+main.fit .pane .splist{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+#rpaneSp{gap:8px}
+#rpaneSp .chips{flex:none;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
+#rpaneSp .chip{padding:6px 12px;font-size:13px;white-space:nowrap}
+#rpaneSp .sp{padding:8px 12px;gap:10px}
+#rpaneSp .play{width:38px;height:38px}
+#rpaneSp .sp .nm b{font-size:15px}
+#rpaneSp .sp .nm i{font-size:12px}
+#rpaneMap .map{flex:1;height:auto;min-height:120px}
+.resfoot{flex:none;display:flex;flex-direction:column;gap:8px}
+.resfoot .btn{min-height:46px}
+.banner.small{padding:8px 12px;font-size:13px;margin:0}
+details.more summary{cursor:pointer;font-size:13px;color:var(--muted);text-decoration:underline;padding:4px 0;list-style:none;text-align:center}
+details.more summary::-webkit-details-marker{display:none}
+details.more[open]{display:flex;flex-direction:column;gap:8px}
+@media print{html,body{height:auto;overflow:visible}main{overflow:visible}main .pane.hide{display:flex!important}main.fit .pane .splist{overflow:visible}}
+/* profile pages: menu rows that open a page, with a back arrow */
+.pfhead{display:flex;align-items:center;gap:10px}
+.pfpage{display:flex;flex-direction:column;gap:12px}
+.navrow{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;min-height:56px;color:var(--ink)}
+.navrow+.navrow{border-top:1px solid var(--line)}
+.navrow b{display:block;font-size:15px}
+.navrow small{display:block;font-size:13px;color:var(--muted);margin-top:1px}
+.navrow svg{flex:none;color:var(--muted)}
+.navrow:focus-visible{outline:3px solid var(--forest);outline-offset:-3px}
+.profile input{min-height:38px;padding:4px 10px;font-size:16px;border-width:1.5px}
+.profile label.f{font-size:12px;gap:2px}
 /* short phones: drop the extras so Home and Walk still fit */
 @media (max-height:740px){.hero .trace,.tip{display:none}.hero{padding-bottom:12px}}
 /* auto-fit: app.js adds t1, t2, t3 to Home or Walk, one at a time, until nothing scrolls */
@@ -233,7 +268,7 @@ main.fit.t2 .hero .hi,main.fit.t2 .hero .sum{display:none}
 main.fit.t2 .micbtn{width:76px;height:76px;box-shadow:0 0 0 7px var(--ring)}
 main.fit.t2 .micbtn svg{width:40px;height:40px}
 main.fit.t2 .mic{gap:8px}
-main.fit.t2 input{min-height:40px}
+main.fit.t2 input{min-height:36px}
 main.fit.t2 .banner{font-size:13px;padding:8px 12px}
 main.fit.t2 .rbtn{width:50px;height:50px}main.fit.t2 .rbtn.stop{width:66px;height:66px}
 main.fit.t3 .hero,main.fit.t3 #a11yOn{display:none}
