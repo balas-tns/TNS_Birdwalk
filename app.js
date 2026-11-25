@@ -15,7 +15,7 @@ const S = {
   model: 'loading',           // loading | ready | demo | error
   modelMsg: '', info: null, labels: [], geoOk: false, geoAllowed: null,
   route: null, walk: null, lastWalk: null, deferredInstall: null,
-  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false, lang: 'en-IN' }, store.get('tnsSettings', {})),
+  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false, lang: 'en-IN', sendClips: true }, store.get('tnsSettings', {})),
   walks: store.get('tnsWalks', []),
   places: store.get('tnsPlaces', [])        // places added on this phone or scanned from a place QR code
 };
@@ -239,8 +239,15 @@ function renderHome() {
   const notice = S.model === 'demo'
     ? `<p class="banner">Demo mode: the BirdNET+ V3.0 files aren't on the server yet, so results will be sample data. GPS and the walk timer are real.</p>`
     : S.model === 'error' ? `<p class="banner err">The bird sound model could not load. ${esc(S.modelMsg)}</p>` : '';
+  const R = S.recover;
+  const recCard = R ? `<section class="card" style="border:3px solid var(--ochre);display:flex;flex-direction:column;gap:10px" role="region" aria-label="Unfinished walk">
+      <b style="font-size:17px">Your walk was interrupted</b>
+      <p class="muted">${esc(R.routeName)} · started ${esc(new Date(R.start).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }))} · ${km(R.track || []).toFixed(1)} km · ${Object.keys(R.species || {}).length} species saved. Nothing was lost.</p>
+      <button class="btn" id="recContinue">Continue this walk</button>
+      <button class="btn alt" id="recFinish">Finish and see the results</button>
+    </section>` : '';
   view.innerHTML = `
-    ${notice}
+    ${notice}${recCard}
     <section class="hero">
       <p style="font-size:13px;font-weight:600;opacity:.85">${S.settings.name ? 'Namaskaram, ' + esc(S.settings.name) : 'Namaskaram'}</p>
       <h1>Ready for a bird walk?</h1>
@@ -270,7 +277,9 @@ function renderHome() {
     Object.assign(S.settings, { voice: true, buzz: true, big: true }); saveSettings(); renderHome(); focusHeading();
     speak(P('modeOn', S.settings.every), true);
   });
-  const st = $('#start'); if (st) st.addEventListener('click', startWalk);
+  const st = $('#start'); if (st) st.addEventListener('click', () => startWalk());
+  const rc = $('#recContinue'); if (rc) rc.addEventListener('click', () => startWalk(S.recover));
+  const rf = $('#recFinish'); if (rf) rf.addEventListener('click', () => finishRecovered());
   const ins = $('#install');
   if (ins) ins.addEventListener('click', async () => { S.deferredInstall.prompt(); await S.deferredInstall.userChoice; S.deferredInstall = null; renderHome(); });
 }
@@ -278,8 +287,8 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.de
 
 /* ---------- walk ---------- */
 let audio = null, geoWatch = null, wakeLock = null, tick = null;
-async function startWalk() {
-  const r = allRoutes().find((x) => x.id === S.route) || ANYWHERE;
+async function startWalk(prev) {
+  const r = prev ? { id: prev.route, name: prev.routeName } : allRoutes().find((x) => x.id === S.route) || ANYWHERE;
   let stream;
   try {
     const a = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
@@ -299,12 +308,21 @@ async function startWalk() {
   const mute = ctx.createGain(); mute.gain.value = 0;
   src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
   const now = Date.now();
-  S.walk = {
+  if (prev) {                                // carry on a walk that was saved before a refresh or crash
+    prev.species = prev.species || {};
+    Object.values(prev.species).forEach((x) => { x.clip = null; });
+    S.walk = Object.assign(prev, { active: true, paused: false, pausedAt: null, pausedMs: (prev.pausedMs || 0) + Math.max(0, now - (prev.savedAt || now)),
+      anchors: [{ audioSec: 0, wall: now }], sentSec: 0, level: new Array(32).fill(0.05), pending: 0, geoSent: false, resumed: (prev.resumed || 0) + 1 });
+    S.recover = null;
+  } else {
+    if (S.recover) { const old = S.recover; S.recover = null; old.active = false; old.end = old.savedAt || now; if (old.demo && !Object.keys(old.species || {}).length) addDemo(old); saveWalk(old); }
+    S.walk = {
     id: String(now), active: true, paused: false, route: r.id, routeName: r.name, start: now, end: null,
     demo: S.model === 'demo', model: S.model === 'ready' ? 'BirdNET+ V3.0' : 'demo', track: [], detections: [],
     species: {}, humanWindows: 0, windows: 0, anchors: [{ audioSec: 0, wall: now }], sentSec: 0, level: new Array(32).fill(0.05),
     pausedMs: 0, pausedAt: null, pending: 0, geoUsed: false, geoSent: false, errors: 0
   };
+  }
   audio = { ctx, stream, proc, src };
   proc.onaudioprocess = (ev) => {
     const w = S.walk; if (!w || w.paused) return;
@@ -325,6 +343,8 @@ async function startWalk() {
   }
   await keepAwake();
   buzz(300);
+  document.documentElement.classList.add('walking');
+  checkpoint(true);
   go('walk');
   lastSpoken = Date.now();
   say('started', [r.name]);
@@ -359,14 +379,125 @@ function onWindow(m) {
     if (d.score < S.settings.minConfidence) return;
     const L = S.labels[d.i]; if (!L) return;
     w.detections.push({ i: d.i, score: +d.score.toFixed(3), t: Math.round(t), lat: loc.lat, lon: loc.lon, acc: loc.acc, est: loc.est });
-    if (!w.species[d.i]) newBird(L, d.score);
+    if (!w.species[d.i]) { newBird(L, d.score); lastCheckpoint = 0; }
     else if (S.settings.repeat && Date.now() - (w.species[d.i].said || 0) > 300000) { w.species[d.i].said = Date.now(); newBird(L, d.score); }
     const sp = w.species[d.i] || (w.species[d.i] = { said: Date.now(), i: d.i, sci: L.sci, common: L.common, group: L.group, count: 0, best: 0, t: t, lat: loc.lat, lon: loc.lon, est: loc.est, clipScore: 0, clip: null });
     sp.count++;
     if (d.score > sp.best) sp.best = d.score;
-    if (k === 0 && m.pcm && d.score > sp.clipScore) { sp.clipScore = d.score; sp.clip = wav(m.pcm, C.model.sampleRate); }
+    if (k === 0 && m.pcm && d.score > sp.clipScore) { sp.clipScore = d.score; sp.clip = wav(m.pcm, C.model.sampleRate); saveClip(w.id, sp); }
   });
 }
+/* ---------- sound clips: one best 3-second clip per species, kept on the phone in IndexedDB ---------- */
+const CLIPS = {};                                   // walkId -> { sci: Blob }, loaded on demand
+const KEEP_CLIP_WALKS = 30;                         // clips are kept for the 30 most recent walks
+let clipDb = null;
+function idb() {
+  if (clipDb) return clipDb;
+  clipDb = new Promise((res, rej) => {
+    if (!('indexedDB' in window)) return rej(new Error('no IndexedDB'));
+    const r = indexedDB.open('tnsClips', 1);
+    r.onupgradeneeded = () => { const st = r.result.createObjectStore('clips', { keyPath: 'key' }); st.createIndex('walk', 'walkId'); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  clipDb.catch(() => { clipDb = null; });
+  return clipDb;
+}
+async function clipTx(mode, fn) {
+  const db = await idb();
+  return new Promise((res, rej) => { const t = db.transaction('clips', mode), out = fn(t.objectStore('clips')); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); });
+}
+function saveClip(walkId, sp) {                       // called whenever a better clip for a species arrives
+  if (!sp.clip) return;
+  (CLIPS[walkId] = CLIPS[walkId] || {})[sp.sci] = sp.clip;
+  clipTx('readwrite', (st) => st.put({ key: walkId + '|' + sp.sci, walkId, sci: sp.sci, common: sp.common, score: sp.clipScore, blob: sp.clip, sent: false })).catch(() => {});
+}
+async function walkClips(walkId) {
+  try {
+    const rows = await clipTx('readonly', (st) => st.index('walk').getAll(walkId));
+    return rows || [];
+  } catch (e) { return []; }
+}
+async function loadClips(walkId) {
+  const rows = await walkClips(walkId);
+  const m = CLIPS[walkId] = CLIPS[walkId] || {};
+  rows.forEach((r) => { if (!m[r.sci]) m[r.sci] = r.blob; });
+  return m;
+}
+async function deleteClips(walkIds) {
+  for (const id of walkIds) {
+    delete CLIPS[id];
+    const rows = await walkClips(id);
+    await clipTx('readwrite', (st) => rows.forEach((r) => st.delete(r.key))).catch(() => {});
+  }
+}
+async function pruneClips() {                         // keep the phone's storage in check
+  const keep = new Set(S.walks.slice(0, KEEP_CLIP_WALKS).map((w) => w.id).concat(S.walk ? [S.walk.id] : [], S.recover ? [S.recover.id] : []));
+  try {
+    const keys = await clipTx('readonly', (st) => st.getAllKeys());
+    const old = [...new Set((keys || []).map((k) => k.split('|')[0]))].filter((id) => !keep.has(id));
+    const keepPending = new Set(S.walks.filter((w) => w.submitted && !w.clipsDone && !w.demo).map((w) => w.id));
+    await deleteClips(old.filter((id) => !keepPending.has(id)));
+  } catch (e) {}
+}
+const toBase64 = (blob) => new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(String(f.result).split(',')[1]); f.onerror = () => rej(f.error); f.readAsDataURL(blob); });
+let uploading = false;
+async function uploadClips(w, progress) {             // after the walk itself is saved in the Sheet
+  if (!C.uploadUrl || w.demo || !S.settings.sendClips) return { sent: 0, total: 0 };
+  const rows = (await walkClips(w.id)).filter((r) => !r.sent);
+  let sent = 0;
+  for (const r of rows) {
+    if (progress) progress(sent, rows.length);
+    try {
+      const data = await toBase64(r.blob);
+      const res = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'clip', walk_id: w.id, sci: r.sci, common: r.common, start: w.start, score: r.score, mime: 'audio/wav', data }) });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || 'not saved');
+      r.sent = true; r.fileId = j.file_id;
+      await clipTx('readwrite', (st) => st.put(r));
+      sent++;
+    } catch (e) { return { sent, total: rows.length, error: e.message }; }
+  }
+  w.clipsDone = true; store.set('tnsWalks', S.walks);
+  return { sent, total: rows.length };
+}
+async function retryClips() {                         // walks submitted earlier whose clips did not all go
+  if (uploading || !C.uploadUrl || !navigator.onLine || !S.settings.sendClips) return;
+  uploading = true;
+  try { for (const w of S.walks.filter((x) => x.submitted && !x.clipsDone && !x.demo)) { const r = await uploadClips(w); if (r.error) break; } }
+  finally { uploading = false; }
+}
+window.addEventListener('online', () => setTimeout(retryClips, 3000));
+
+/* ---------- keep the walk safe: saved to the phone every few seconds ---------- */
+const LIVE = 'tnsLiveWalk';
+let lastCheckpoint = 0;
+function checkpoint(force) {
+  const w = S.walk; if (!w || !w.active) return;
+  if (!force && Date.now() - lastCheckpoint < 5000) return;
+  lastCheckpoint = Date.now();
+  const sp = {}; Object.entries(w.species).forEach(([k, v]) => { sp[k] = Object.assign({}, v, { clip: null }); });
+  const copy = Object.assign({}, w, { species: sp, level: null, savedAt: Date.now(), paused: false,
+    pausedMs: w.paused ? w.pausedMs + (Date.now() - w.pausedAt) : w.pausedMs, pausedAt: null });
+  if (!store.set(LIVE, copy)) { copy.detections = copy.detections.slice(-3000); copy.track = copy.track.filter((_, i) => i % 2 === 0); store.set(LIVE, copy); }
+}
+function clearCheckpoint() { try { localStorage.removeItem(LIVE); } catch (e) {} document.documentElement.classList.remove('walking'); }
+window.addEventListener('beforeunload', (e) => {   // asks "Leave site?" if someone reloads or closes mid-walk
+  if (S.walk && S.walk.active) { checkpoint(true); e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('pagehide', () => checkpoint(true));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') checkpoint(true); });
+function finishRecovered() {
+  const w = S.recover; if (!w) return;
+  S.recover = null;
+  w.active = false; w.end = w.savedAt || Date.now();
+  Object.values(w.species || {}).forEach((x) => { x.clip = null; });
+  if (w.demo && !Object.keys(w.species).length) addDemo(w);
+  saveWalk(w); clearCheckpoint();
+  S.lastWalk = w;
+  go('results-' + w.id);
+}
+
 let birdQueue = [], birdTimer = null, lastSpoken = 0;
 function newBird(L, score) {                 // batch birds heard within a few seconds into one sentence
   birdQueue.push([L, Math.round(score * 100)]);
@@ -447,6 +578,7 @@ function updateWalk() {
   const recent = Object.values(w.species).sort((a, b) => b.t - a.t).slice(0, 3);
   if (recent.length) $('#latest').textContent = 'Heard: ' + recent.map((s) => s.common + ' ' + Math.round(s.best * 100) + '%').join(', ');
   drawMap($('#map'), w.track, Object.values(w.species));
+  checkpoint();
   if (S.settings.voice && S.settings.every && !w.paused && Date.now() - lastSpoken > S.settings.every * 60000) { lastSpoken = Date.now(); speak(walkStatus(true)); }
 }
 function togglePause() {
@@ -455,6 +587,7 @@ function togglePause() {
   else { w.pausedMs += Date.now() - w.pausedAt; w.paused = false; w.anchors.push({ audioSec: w.sentSec, wall: Date.now() }); audio.ctx.resume(); }
   $('#pause').textContent = w.paused ? 'Resume' : 'Pause'; updateWalk();
   buzz(w.paused ? 200 : [100, 60, 100]);
+  checkpoint(true);
   say(w.paused ? 'paused' : 'resumed', []);
 }
 async function finishWalk() {
@@ -475,7 +608,7 @@ async function finishWalk() {
     flushResolve = null;
     clearInterval(bar);
   } else if (w.demo) addDemo(w);
-  saveWalk(w);
+  saveWalk(w); clearCheckpoint();
   S.lastWalk = w; S.walk = null;
   go('results-' + w.id);
   buzz([400, 100, 400]);
@@ -529,12 +662,12 @@ let resFilter = 'All', player = null;
 function renderResults(id) {
   const w = S.walks.find((x) => x.id === id);
   if (!w) { view.innerHTML = '<p class="empty">That walk is no longer on this phone.</p>'; return; }
-  const live = S.lastWalk && S.lastWalk.id === id ? S.lastWalk : null;
+  if (!CLIPS[id] || !CLIPS[id]._loaded) loadClips(id).then((m) => { m._loaded = true; if (location.hash === '#results-' + id && Object.keys(m).length > 1) renderResults(id); });
   const groups = ['All'].concat([...new Set(w.species.map((s) => s.group))]).concat(w.species.some((s) => s.review) ? ['Under review'] : []);
   if (!groups.includes(resFilter)) resFilter = 'All';
   const list = w.species.filter((s) => resFilter === 'All' || (resFilter === 'Under review' ? s.review : s.group === resFilter));
   const d = new Date(w.start);
-  const clipFor = (s) => live && Object.values(live.species).find((x) => x.sci === s.sci && x.clip);
+  const clipFor = (s) => (CLIPS[id] || {})[s.sci] || null;
   view.innerHTML = `
     <div><span class="muted" style="font-weight:700;font-size:12px">${esc(d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase())} · ${esc(w.routeName.toUpperCase())}</span>
     <h1>${w.species.length} species heard</h1>
@@ -555,7 +688,7 @@ function renderResults(id) {
       }).join('') : '<p class="empty">Nothing in this group.</p>'}
     </div>
     <div style="display:flex;flex-direction:column;gap:10px" class="noprint">
-      ${C.uploadUrl ? (w.submitted ? '<p class="banner">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
+      ${C.uploadUrl ? (w.submitted ? '<p class="banner">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' + (!w.clipsDone && !w.demo && S.settings.sendClips ? '<button class="btn alt small" id="resendClips">Send the sound clips now</button>' : '') : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
       <div class="row"><button class="btn alt small" id="dlJson">Download walk data</button><button class="btn alt small" id="dlGpx">Download route (GPX)</button></div>
       <button class="btn alt small" id="del">Delete this walk</button>
     </div>`;
@@ -574,11 +707,18 @@ function renderResults(id) {
   view.querySelectorAll('[data-play]').forEach((b) => b.addEventListener('click', () => {
     const c = clipFor(list[+b.dataset.play]); if (!c) return;
     if (player) { player.pause(); URL.revokeObjectURL(player.src); }
-    player = new Audio(URL.createObjectURL(c.clip)); player.play().catch(() => {});
+    player = new Audio(URL.createObjectURL(c)); player.play().catch(() => {});
   }));
   $('#dlJson').addEventListener('click', () => download(`tns-walk-${w.id}.json`, JSON.stringify(w, null, 1), 'application/json'));
   $('#dlGpx').addEventListener('click', () => download(`tns-walk-${w.id}.gpx`, gpx(w), 'application/gpx+xml'));
-  $('#del').addEventListener('click', () => { S.walks = S.walks.filter((x) => x.id !== id); store.set('tnsWalks', S.walks); go('history'); });
+  $('#del').addEventListener('click', () => { S.walks = S.walks.filter((x) => x.id !== id); store.set('tnsWalks', S.walks); deleteClips([id]); go('history'); });
+  const rc = $('#resendClips');
+  if (rc) rc.addEventListener('click', async () => {
+    rc.disabled = true;
+    const r = await uploadClips(w, (n, t) => { rc.textContent = `Sending sound clips ${n + 1} of ${t}…`; });
+    rc.textContent = r.error ? `${r.sent} of ${r.total} clips sent. Tap to try again.` : 'Sound clips sent to TNS.'; rc.disabled = !r.error;
+    announce(rc.textContent);
+  });
   const sub = $('#submit');
   if (sub) sub.addEventListener('click', async () => {
     sub.disabled = true; sub.textContent = 'Sending…'; announce('Sending to TNS.');
@@ -588,7 +728,13 @@ function renderResults(id) {
       let j = {}; try { j = await r.json(); } catch (e) {}
       if (r.ok && j.ok !== false) {
         w.submitted = Date.now(); store.set('tnsWalks', S.walks);
-        sub.textContent = j.duplicate ? 'Already sent to TNS' : 'Sent to TNS. Thank you!';
+        const done = j.duplicate ? 'Already sent to TNS' : 'Sent to TNS. Thank you!';
+        if (S.settings.sendClips && !w.demo) {
+          uploading = true;
+          const c = await uploadClips(w, (n, t) => { sub.textContent = `Walk sent. Sending sound clips ${n + 1} of ${t}…`; });
+          uploading = false;
+          sub.textContent = c.error ? `${done} ${c.sent} of ${c.total} sound clips sent; the rest will go when there is signal.` : c.total ? `${done} ${c.total} sound ${c.total === 1 ? 'clip' : 'clips'} included.` : done;
+        } else sub.textContent = done;
         announce(sub.textContent); speak(P('sent')); buzz(200);
       } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; announce(sub.textContent, true); speak(P('notSent')); }
     } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; announce(sub.textContent, true); speak(P('notSent')); }
@@ -678,6 +824,7 @@ async function renderMore() {
     </div>
     <h2 class="noprint">Settings</h2>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:14px">
+      <label class="toggle"><input type="checkbox" id="sClips" ${S.settings.sendClips ? 'checked' : ''}><span>Send sound clips to TNS<small>With each walk, one 3-second clip per bird goes to the TNS Google Drive so experts can check it. About 2 MB per walk. Human voices are never included.</small></span></label>
       <label class="f">Your name (shown on this phone and in your walk data)<input id="nm" value="${esc(S.settings.name)}" autocomplete="name"></label>
       <label class="f">Microphone<select id="mic"><option value="">Phone's built-in mic</option></select></label>
       <label class="f">Minimum confidence: <span id="mcv" aria-hidden="true">${Math.round(S.settings.minConfidence * 100)}%</span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}" aria-valuetext="${Math.round(S.settings.minConfidence * 100)} percent"></label>
@@ -722,9 +869,10 @@ async function renderMore() {
         { enableHighAccuracy: true, timeout: 15000 });
     } else done(null, null);
   });
+  $('#sClips').addEventListener('change', (e) => { S.settings.sendClips = e.target.checked; saveSettings(); announce('Sound clips ' + (e.target.checked ? 'on.' : 'off.')); });
   $('#nm').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); store.set('tnsSettings', S.settings); });
   $('#mc').addEventListener('input', (e) => { S.settings.minConfidence = +e.target.value; $('#mcv').textContent = Math.round(+e.target.value * 100) + '%'; e.target.setAttribute('aria-valuetext', Math.round(+e.target.value * 100) + ' percent'); store.set('tnsSettings', S.settings); });
-  $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { S.walks = []; store.set('tnsWalks', []); renderMore(); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });
+  $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { deleteClips(S.walks.map((x) => x.id)); S.walks = []; store.set('tnsWalks', []); renderMore(); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });
   const sel = $('#mic');
   try {
     const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default');
@@ -745,6 +893,10 @@ function modelText() {
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 applyDisplay();
 loadNames(lang());
+S.recover = store.get(LIVE, null);
+if (S.recover && !(S.recover.track && S.recover.start)) { S.recover = null; clearCheckpoint(); }
+setTimeout(() => { pruneClips(); retryClips(); }, 4000);
+if (S.recover) setTimeout(() => tell('Your walk was interrupted, but it was saved. Continue this walk, or finish and see the results.', true), 1200);
 startWorker();
 route();
 }

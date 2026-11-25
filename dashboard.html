@@ -64,6 +64,9 @@ td i{color:var(--mut)}
 .btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--och);outline-offset:2px}
 .acts{display:flex;gap:8px;flex-wrap:wrap}
 .empty{color:var(--mut);font-size:14px;padding:12px 0}
+.play{all:unset;cursor:pointer;width:40px;height:40px;border-radius:20px;background:var(--mint);display:inline-grid;place-items:center;flex:none}
+.play:focus-visible{outline:3px solid var(--och);outline-offset:2px}
+.play[disabled]{opacity:.4;cursor:default}
 footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 24px}
 @media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;font-size:12px;color:var(--mut)}.stack td:empty{display:none}#map{height:320px}}
 @media print{header .filters,.acts,#exportBtn{display:none}}
@@ -212,7 +215,8 @@ function render() {
   $('#places').innerHTML = `<tr><th>Place</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.place || 'Unnamed').map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
   $('#walkers').innerHTML = `<tr><th>Walker</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.walker || 'Walkers without a name').slice(0, 15).map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
   const qrows = queue.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 60);
-  $('#review').innerHTML = `<tr><th>Species</th><th>Walk</th><th class="n">Confidence</th><th>Decision</th></tr>` + (qrows.length ? qrows.map((s, i) => `<tr><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td>${esc(s.place)}<br><i>${esc(day(s.start))}${s.walker ? ' · ' + esc(s.walker) : ''}</i></td><td class="n">${Math.round(num(s.best_confidence) * 100)}%</td><td><div class="acts"><button class="btn" data-rv="${i}" data-st="confirmed">Confirm</button><button class="btn alt" data-rv="${i}" data-st="rejected">Reject</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty">Nothing waiting for review.</td></tr>');
+  $('#review').innerHTML = `<tr><th>Listen</th><th>Species</th><th>Walk</th><th class="n">Confidence</th><th>Decision</th></tr>` + (qrows.length ? qrows.map((s, i) => `<tr><td>${s.clip_file_id ? `<button class="play" data-clip="${esc(s.clip_file_id)}" aria-label="Play the clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#1F5C43" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td>${esc(s.place)}<br><i>${esc(day(s.start))}${s.walker ? ' · ' + esc(s.walker) : ''}</i></td><td class="n">${Math.round(num(s.best_confidence) * 100)}%</td><td><div class="acts"><button class="btn" data-rv="${i}" data-st="confirmed">Confirm</button><button class="btn alt" data-rv="${i}" data-st="rejected">Reject</button></div></td></tr>`).join('') : '<tr><td colspan="5" class="empty">Nothing waiting for review.</td></tr>');
+  document.querySelectorAll('[data-clip]').forEach((b) => b.addEventListener('click', () => playClip(b.dataset.clip, b)));
   document.querySelectorAll('[data-rv]').forEach((b) => b.addEventListener('click', () => decide(qrows[+b.dataset.rv], b.dataset.st, b)));
   const recent = walks.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 10);
   $('#recent').innerHTML = `<tr><th>Date</th><th>Place</th><th class="n">Species</th></tr>` + (recent.length ? recent.map((w) => `<tr><td>${esc(day(w.start))}</td><td>${esc(w.place)}${w.walker ? '<br><i>' + esc(w.walker) + '</i>' : ''}</td><td class="n">${num(w.species_count)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">No walks yet.</td></tr>');
@@ -263,6 +267,27 @@ function drawMapLibre() {
     map.on('mouseleave', 'rec', () => { map.getCanvas().style.cursor = ''; });
     mapReady = true; fit();
   });
+}
+
+/* clips stay private in the TNS Google Drive; the script hands them over one at a time */
+const clipCache = {};
+let player = null;
+async function playClip(id, btn) {
+  if (player) { player.pause(); }
+  if (SAMPLE) { btn.setAttribute('aria-label', 'Sample data has no clips'); return; }
+  try {
+    btn.disabled = true;
+    if (!clipCache[id]) {
+      const r = await fetch(C.uploadUrl + (C.uploadUrl.includes('?') ? '&' : '?') + 'action=clip&id=' + encodeURIComponent(id));
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'not found');
+      const bin = atob(j.data), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      clipCache[id] = URL.createObjectURL(new Blob([bytes], { type: j.mime || 'audio/wav' }));
+    }
+    player = new Audio(clipCache[id]); await player.play();
+  } catch (e) { btn.title = 'Could not play: ' + e.message; }
+  finally { btn.disabled = false; }
 }
 
 async function decide(s, status, btn) {
