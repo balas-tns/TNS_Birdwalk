@@ -15,13 +15,49 @@ const S = {
   model: 'loading',           // loading | ready | demo | error
   modelMsg: '', info: null, labels: [], geoOk: false, geoAllowed: null,
   route: null, walk: null, lastWalk: null, deferredInstall: null,
-  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence }, store.get('tnsSettings', {})),
+  settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false }, store.get('tnsSettings', {})),
   walks: store.get('tnsWalks', []),
   places: store.get('tnsPlaces', [])        // places added on this phone or scanned from a place QR code
 };
 const ANYWHERE = { id: 'free', name: 'Walk anywhere', meta: 'Any place, any path, any length', tag: 'Open' };
 const slug = (t) => t.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'place';
 const allRoutes = () => C.routes.concat(S.places, [ANYWHERE]);
+
+/* ---------- accessibility: screen reader, speech, vibration, display ---------- */
+let srTimer = null;
+function announce(msg, urgent) {            // read out by TalkBack / VoiceOver without moving focus
+  const el = $(urgent ? '#srA' : '#sr'); if (!el) return;
+  el.textContent = ''; clearTimeout(srTimer);
+  srTimer = setTimeout(() => { el.textContent = msg; }, 60);
+}
+let voices = [];
+function loadVoices() { try { voices = speechSynthesis.getVoices(); } catch (e) {} }
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function speak(msg, force) {                // the app's own voice, for walkers who don't use a screen reader
+  if (!(S.settings.voice || force) || !('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance(msg);
+    u.voice = voices.find((v) => v.lang === 'en-IN') || voices.find((v) => /^en/.test(v.lang)) || null;
+    u.lang = u.voice ? u.voice.lang : 'en-IN'; u.rate = 0.95;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function tell(msg, urgent) { announce(msg, urgent); speak(msg); }
+function buzz(pattern) { if (S.settings.buzz && navigator.vibrate) try { navigator.vibrate(pattern); } catch (e) {} }
+function applyDisplay() { document.body.classList.toggle('big', !!S.settings.big); document.body.classList.toggle('hc', !!S.settings.hc); }
+function saveSettings() { store.set('tnsSettings', S.settings); applyDisplay(); }
+function focusHeading() { const h = view.querySelector('h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: false }); } }
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
+function spokenTime(ms) { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? 'less than a minute' : plural(m, 'minute'); }
+function walkStatus() {
+  const w = S.walk; if (!w) return '';
+  const now = w.paused ? w.pausedAt : Date.now(), sp = Object.values(w.species);
+  const recent = sp.sort((a, b) => b.t - a.t).slice(0, 3).map((s) => `${s.common}, ${Math.round(s.best * 100)} percent`);
+  const last = w.track[w.track.length - 1];
+  return `${w.paused ? 'Paused. ' : ''}${spokenTime(now - w.start - w.pausedMs)} walked, ${km(w.track).toFixed(1)} kilometres. ` +
+    (sp.length ? `${plural(sp.length, 'species', 'species')} so far. Latest: ${recent.join(', ')}.` : (w.demo ? 'Demo mode: birds are added when you finish.' : 'No birds identified yet.')) +
+    (last ? '' : ' Still waiting for GPS.');
+}
 function addPlace(name, lat, lon) {
   name = String(name || '').trim().slice(0, 60);
   if (!name) return null;
@@ -64,6 +100,7 @@ function setModel(state, msg) {
   S.model = state; S.modelMsg = msg || '';
   const b = $('#modelBadge');
   b.textContent = { loading: 'Loading model…', ready: 'BirdNET+ V3.0 ready', demo: 'Demo mode', error: 'Model missing' }[state];
+  if (state !== 'loading' && (!location.hash || location.hash === '#home')) announce(state === 'ready' ? 'Bird model ready.' : state === 'demo' ? 'Demo mode. Results will be sample data.' : 'The bird model could not load.');
   if (location.hash === '' || location.hash === '#home' || location.hash.startsWith('#more')) route();
 }
 
@@ -81,25 +118,34 @@ function route() {
       if (ll) { const [a, b] = ll.split(',').map(Number); if (isFinite(a) && isFinite(b)) { lat = a; lon = b; } }
     } catch (e) {}
     const p = addPlace(name, lat, lon);
-    if (p) S.route = p.id;
+    if (p) { S.route = p.id; setTimeout(() => tell(p.name + ' is ready. Find the Start walk button.'), 800); }
     location.replace('#home');
+    return;
+  }
+  if (h === 'access' || h.startsWith('access-')) {        // a QR code that opens the app in spoken mode, optionally with a route
+    Object.assign(S.settings, { voice: true, buzz: true, big: true }); saveSettings();
+    const rid = h.slice(7); if (rid && allRoutes().some((x) => x.id === rid)) S.route = rid;
+    location.replace('#home');
+    setTimeout(() => speak('Welcome to TNS Bird Walk. Spoken mode is on. ' + (S.route ? 'Your route is selected. ' : '') + 'Find the Start walk button near the bottom of the screen.', true), 900);
     return;
   }
   if (h.startsWith('route-')) {
     const r = C.routes.find((x) => x.id === h.slice(6));
-    if (r) S.route = r.id;
+    if (r) { S.route = r.id; setTimeout(() => tell(r.name + ' is ready. Find the Start walk button.'), 800); }
     location.replace('#home');
     return;
   }
   if (S.walk && S.walk.active && h !== 'walk') { location.hash = 'walk'; return; }
   const tab = h.startsWith('results') ? 'history' : h === 'walk' ? 'home' : h;
   document.querySelectorAll('.navb').forEach((b) => b.setAttribute('aria-current', b.dataset.go === tab ? 'page' : 'false'));
-  if (h === 'walk') return renderWalk();
-  if (h === 'history') return renderHistory();
-  if (h === 'more') return renderMore();
-  if (h.startsWith('results-')) return renderResults(h.slice(8));
-  renderHome();
+  if (h === 'walk') renderWalk();
+  else if (h === 'history') renderHistory();
+  else if (h === 'more') renderMore();
+  else if (h.startsWith('results-')) renderResults(h.slice(8));
+  else renderHome();
+  if (h !== lastPage) { if (lastPage !== null) focusHeading(); lastPage = h; }
 }
+let lastPage = null;
 
 /* ---------- home ---------- */
 function renderHome() {
@@ -114,20 +160,31 @@ function renderHome() {
       <p style="font-size:13px;font-weight:600;opacity:.85">${S.settings.name ? 'Namaskaram, ' + esc(S.settings.name) : 'Namaskaram'}</p>
       <h1>Ready for a bird walk?</h1>
       <div class="stats"><div><b>${total}</b><span>walks</span></div><div><b>${species.size}</b><span>species</span></div></div>
+      ${S.settings.voice ? '' : '<button class="btn alt small" id="a11yOn" style="background:#fff">Turn on spoken mode (for blind and low-vision walkers)</button>'}
     </section>
     <h2>Choose a route or place</h2>
     <div style="display:flex;flex-direction:column;gap:10px">
       ${allRoutes().map((r) => `
-        <button class="route" data-route="${esc(r.id)}" aria-pressed="${S.route === r.id}">
+        <button class="route" data-route="${esc(r.id)}" aria-pressed="${S.route === r.id}" aria-label="${esc(r.name)}. ${esc(r.meta)}. ${esc(r.tag)}">
           <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F5C43" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 19c3-6 5-2 8-8s5-4 8-6"/><circle cx="4" cy="19" r="1.5"/><circle cx="20" cy="5" r="1.5"/></svg></span>
           <span style="flex:1"><b>${esc(r.name)}</b><span class="muted">${esc(r.meta)}</span></span>
           <span class="tag">${esc(r.tag)}</span>
         </button>`).join('')}
     </div>
-    <p class="card muted">Best between 6:00 and 8:30 am. Hold the phone out of your pocket with the screen on, walk slowly, and stop for a minute every 200 m.</p>
+    <p class="card muted">${S.settings.voice ? 'Spoken mode is on. Start the walk, then keep the phone in a shirt pocket or on a lanyard with the microphone facing out. The phone tells you each new bird it hears. Double-tap the Say status button at any time.' : 'Best between 6:00 and 8:30 am. Hold the phone out of your pocket with the screen on, walk slowly, and stop for a minute every 200 m.'}</p>
     <button class="btn" id="start" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}>${S.model === 'loading' ? 'Loading the bird model…' : S.route ? 'Start walk' : 'Pick a route or Walk anywhere'}</button>
     ${S.deferredInstall ? '<button class="btn alt" id="install">Install the app on this phone</button>' : ''}`;
-  view.querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => { S.route = b.dataset.route; renderHome(); }));
+  view.querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => {
+    S.route = b.dataset.route; renderHome();
+    const again = view.querySelector(`[data-route="${CSS.escape(S.route)}"]`); if (again) again.focus();
+    const r = allRoutes().find((x) => x.id === S.route);
+    tell((r ? r.name : 'Route') + ' selected. The Start walk button is below the list.');
+  }));
+  const on = $('#a11yOn');
+  if (on) on.addEventListener('click', () => {
+    Object.assign(S.settings, { voice: true, buzz: true, big: true }); saveSettings(); renderHome(); focusHeading();
+    speak('Spoken mode is on. The phone will speak each new bird and give a walk update every ' + S.settings.every + ' minutes. Change this under Share and settings.', true);
+  });
   const st = $('#start'); if (st) st.addEventListener('click', startWalk);
   const ins = $('#install');
   if (ins) ins.addEventListener('click', async () => { S.deferredInstall.prompt(); await S.deferredInstall.userChoice; S.deferredInstall = null; renderHome(); });
@@ -145,6 +202,7 @@ async function startWalk() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: a });
   } catch (e) {
     view.insertAdjacentHTML('afterbegin', '<p class="banner err">Microphone permission is needed to listen for birds. Allow it in the browser and try again.</p>');
+    tell('Microphone permission is needed to listen for birds. Allow it and try again.', true);
     return;
   }
   let ctx;
@@ -181,7 +239,10 @@ async function startWalk() {
     }, () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   }
   await keepAwake();
+  buzz(300);
   go('walk');
+  lastSpoken = Date.now();
+  tell('Walk started on ' + r.name + '. Listening for birds.' + (S.settings.voice ? ' I will tell you each new bird.' : ''));
 }
 function birdWeek(d) { return Math.min(48, d.getMonth() * 4 + Math.min(4, Math.ceil(d.getDate() / 7.75))); }
 async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; } }
@@ -213,11 +274,26 @@ function onWindow(m) {
     if (d.score < S.settings.minConfidence) return;
     const L = S.labels[d.i]; if (!L) return;
     w.detections.push({ i: d.i, score: +d.score.toFixed(3), t: Math.round(t), lat: loc.lat, lon: loc.lon, acc: loc.acc, est: loc.est });
-    const sp = w.species[d.i] || (w.species[d.i] = { i: d.i, sci: L.sci, common: L.common, group: L.group, count: 0, best: 0, t: t, lat: loc.lat, lon: loc.lon, est: loc.est, clipScore: 0, clip: null });
+    if (!w.species[d.i]) newBird(L.common, d.score);
+    else if (S.settings.repeat && Date.now() - (w.species[d.i].said || 0) > 300000) { w.species[d.i].said = Date.now(); newBird(L.common, d.score); }
+    const sp = w.species[d.i] || (w.species[d.i] = { said: Date.now(), i: d.i, sci: L.sci, common: L.common, group: L.group, count: 0, best: 0, t: t, lat: loc.lat, lon: loc.lon, est: loc.est, clipScore: 0, clip: null });
     sp.count++;
     if (d.score > sp.best) sp.best = d.score;
     if (k === 0 && m.pcm && d.score > sp.clipScore) { sp.clipScore = d.score; sp.clip = wav(m.pcm, C.model.sampleRate); }
   });
+}
+let birdQueue = [], birdTimer = null, lastSpoken = 0;
+function newBird(name, score) {              // batch birds heard within a few seconds into one sentence
+  birdQueue.push(`${name}, ${Math.round(score * 100)} percent confidence`);
+  clearTimeout(birdTimer);
+  birdTimer = setTimeout(() => {
+    const n = birdQueue.length, list = birdQueue.join(', ');
+    birdQueue = [];
+    const total = S.walk ? Object.keys(S.walk.species).length : n;
+    buzz([120, 80, 120]);
+    tell(list + '. ' + plural(total, 'species', 'species') + ' so far.');
+    lastSpoken = Date.now();
+  }, 2500);
 }
 function wav(pcm, rate) {
   const b = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(b);
@@ -247,24 +323,28 @@ function renderWalk() {
   view.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
       <div><span class="muted" style="font-weight:700;font-size:12px">${w.active ? 'WALKING' : 'FINISHING'}</span><h1 style="font-size:19px">${esc(w.routeName)}</h1></div>
-      <span class="live" id="live"><i></i><span id="liveTxt">Live</span></span>
+      <span class="live" id="live" aria-hidden="true"><i></i><span id="liveTxt">Live</span></span>
     </div>
-    <div class="map" id="map"></div>
-    <div class="grid3">
+    <div class="map" id="map" aria-hidden="true"></div>
+    <div class="grid3" aria-hidden="true">
       <div class="stat"><span>TIME</span><b id="wTime">00:00</b></div>
       <div class="stat"><span>DISTANCE</span><b id="wDist">0.0 km</b></div>
       <div class="stat"><span>SPECIES</span><b id="wSp">0</b></div>
     </div>
     <div class="card" style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700"><span>Microphone</span><span id="gpsTxt" class="muted">Waiting for GPS…</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700" aria-hidden="true"><span>Microphone</span><span id="gpsTxt" class="muted">Waiting for GPS…</span></div>
       <div class="meter" id="meter" aria-hidden="true">${w.level.map(() => '<span></span>').join('')}</div>
-      <p class="muted" id="latest">${w.demo ? 'Demo mode: listening for sound levels only.' : 'Listening… new birds appear here.'}</p>
+      <p class="muted" id="latest" aria-hidden="true">${w.demo ? 'Demo mode: listening for sound levels only.' : 'Listening… new birds appear here.'}</p>
     </div>
     <div id="finishBox" class="card hide"><p style="font-weight:700">Finishing the analysis…</p><div class="prog"><i id="finBar" style="width:10%"></i></div></div>
-    <div class="row" id="walkBtns">
-      <button class="btn alt" id="pause" style="flex:1">${w.paused ? 'Resume' : 'Pause'}</button>
-      <button class="btn" id="finish" style="flex:1.6">Finish walk</button>
+    <div style="display:flex;flex-direction:column;gap:10px" id="walkBtns">
+      <button class="btn say" id="say">Say status</button>
+      <div class="row">
+        <button class="btn alt" id="pause" style="flex:1">${w.paused ? 'Resume' : 'Pause'}</button>
+        <button class="btn" id="finish" style="flex:1.6">Finish walk</button>
+      </div>
     </div>`;
+  $('#say').addEventListener('click', () => { const t = walkStatus(); announce(t, true); speak(t); lastSpoken = Date.now(); });
   $('#pause').addEventListener('click', togglePause);
   $('#finish').addEventListener('click', finishWalk);
   clearInterval(tick); tick = setInterval(updateWalk, 1000); updateWalk();
@@ -280,14 +360,17 @@ function updateWalk() {
   $('#gpsTxt').textContent = last ? 'GPS ±' + last.acc + ' m' : 'Waiting for GPS…';
   $('#meter').querySelectorAll('span').forEach((s, i) => { s.style.height = Math.max(3, Math.round(w.level[i] * 34)) + 'px'; });
   const recent = Object.values(w.species).sort((a, b) => b.t - a.t).slice(0, 3);
-  if (recent.length) $('#latest').textContent = 'Heard: ' + recent.map((s) => s.common).join(', ');
+  if (recent.length) $('#latest').textContent = 'Heard: ' + recent.map((s) => s.common + ' ' + Math.round(s.best * 100) + '%').join(', ');
   drawMap($('#map'), w.track, Object.values(w.species));
+  if (S.settings.voice && S.settings.every && !w.paused && Date.now() - lastSpoken > S.settings.every * 60000) { lastSpoken = Date.now(); speak(walkStatus()); }
 }
 function togglePause() {
   const w = S.walk; if (!w) return;
   if (!w.paused) { w.paused = true; w.pausedAt = Date.now(); audio.ctx.suspend(); }
   else { w.pausedMs += Date.now() - w.pausedAt; w.paused = false; w.anchors.push({ audioSec: w.sentSec, wall: Date.now() }); audio.ctx.resume(); }
   $('#pause').textContent = w.paused ? 'Resume' : 'Pause'; updateWalk();
+  buzz(w.paused ? 200 : [100, 60, 100]);
+  tell(w.paused ? 'Walk paused. Double-tap Resume to carry on.' : 'Listening again.');
 }
 async function finishWalk() {
   const w = S.walk; if (!w) return;
@@ -295,6 +378,7 @@ async function finishWalk() {
   w.active = false; w.end = Date.now();
   clearInterval(tick);
   $('#walkBtns').classList.add('hide'); $('#finishBox').classList.remove('hide');
+  tell('Finishing. Working out the last birds, please wait.');
   try { audio.proc.disconnect(); audio.src.disconnect(); audio.stream.getTracks().forEach((t) => t.stop()); audio.ctx.close(); } catch (e) {}
   if (geoWatch != null) navigator.geolocation.clearWatch(geoWatch);
   try { if (wakeLock) await wakeLock.release(); } catch (e) {}
@@ -309,6 +393,9 @@ async function finishWalk() {
   saveWalk(w);
   S.lastWalk = w; S.walk = null;
   go('results-' + w.id);
+  buzz([400, 100, 400]);
+  const names = Object.values(w.species).sort((a, b) => b.count - a.count).map((s) => `${s.common} ${Math.round(s.best * 100)} percent`);
+  setTimeout(() => tell(`Walk finished. ${plural(names.length, 'species', 'species')} heard${names.length ? ': ' + names.slice(0, 8).join(', ') + (names.length > 8 ? ', and ' + (names.length - 8) + ' more' : '') : ''}. The Submit to TNS button is below the list.`), 700);
 }
 function addDemo(w) {
   const n = 6 + Math.floor(Math.random() * 4), pick = DEMO.slice().sort(() => Math.random() - 0.5).slice(0, n);
@@ -366,14 +453,15 @@ function renderResults(id) {
     <p class="muted">${fmt(w.end - w.start)} · ${w.km.toFixed(1)} km · ${w.demo ? 'sample data (demo mode)' : 'identified with BirdNET+ V3.0'}</p></div>
     ${w.demo ? '<p class="banner">Demo mode: these species are sample data, placed along your real GPS track.</p>' : ''}
     ${w.humanWindowsRemoved ? `<p class="muted">${w.humanWindowsRemoved} stretches with human voices were discarded and never stored.</p>` : ''}
-    <div class="map" id="rmap"></div>
-    <div class="chips" role="group" aria-label="Filter">${groups.map((g) => `<button class="chip" data-f="${esc(g)}" aria-pressed="${g === resFilter}">${esc(g)} ${g === 'All' ? w.species.length : g === 'Under review' ? w.species.filter((s) => s.review).length : w.species.filter((s) => s.group === g).length}</button>`).join('')}</div>
+    <div class="map" id="rmap" aria-hidden="true"></div>
+    ${w.species.length ? '<button class="btn say small noprint" id="readAll">Read the bird list aloud</button>' : ''}
+    <div class="chips" role="group" aria-label="Show only">${groups.map((g) => `<button class="chip" data-f="${esc(g)}" aria-pressed="${g === resFilter}">${esc(g)} ${g === 'All' ? w.species.length : g === 'Under review' ? w.species.filter((s) => s.review).length : w.species.filter((s) => s.group === g).length}</button>`).join('')}</div>
     <div style="display:flex;flex-direction:column;gap:8px">
       ${list.length ? list.map((s, k) => {
         const c = clipFor(s);
-        return `<div class="sp">
+        return `<div class="sp" role="group" aria-label="${esc(s.common)}, ${s.review ? 'under review' : Math.round(s.best * 100) + ' percent sure'}, ${plural(s.count, 'call')}">
           <button class="play" data-play="${k}" ${c ? '' : 'disabled'} aria-label="${c ? 'Play recording of ' + esc(s.common) : 'No recording kept'}"><svg width="18" height="18" viewBox="0 0 24 24" fill="#1F5C43" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
-          <div class="nm"><b>${esc(s.common)}</b><i>${esc(s.sci)}</i></div>
+          <div class="nm"><b>${esc(s.common)}</b><i lang="la">${esc(s.sci)}</i></div>
           <div class="rt"><span class="pill ${s.review ? 'rev' : ''}">${s.review ? 'Under review' : Math.round(s.best * 100) + '% sure'}</span><span>${s.count} ${s.count === 1 ? 'call' : 'calls'}${s.lat != null ? ' · ' + (s.estimated ? 'approx. location' : 'GPS') : ''}</span></div>
         </div>`;
       }).join('') : '<p class="empty">Nothing in this group.</p>'}
@@ -384,7 +472,17 @@ function renderResults(id) {
       <button class="btn alt small" id="del">Delete this walk</button>
     </div>`;
   drawMap($('#rmap'), w.track, w.species);
-  view.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => { resFilter = b.dataset.f; renderResults(id); }));
+  view.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => {
+    resFilter = b.dataset.f; renderResults(id);
+    const again = view.querySelector(`[data-f="${CSS.escape(resFilter)}"]`); if (again) again.focus();
+    announce('Showing ' + (resFilter === 'All' ? 'all species' : resFilter) + ': ' + view.querySelectorAll('.sp').length + '.');
+  }));
+  const ra = $('#readAll');
+  if (ra) ra.addEventListener('click', () => {
+    const t = `${plural(w.species.length, 'species', 'species')} heard. ` + w.species.slice().sort((a, b) => b.count - a.count)
+      .map((s) => `${s.common}, ${Math.round(s.best * 100)} percent confidence, ${plural(s.count, 'call')}${s.review ? ', under review' : ''}`).join('. ') + '.';
+    if ('speechSynthesis' in window) { speechSynthesis.cancel(); speak(t, true); } else announce(t, true);
+  });
   view.querySelectorAll('[data-play]').forEach((b) => b.addEventListener('click', () => {
     const c = clipFor(list[+b.dataset.play]); if (!c) return;
     if (player) { player.pause(); URL.revokeObjectURL(player.src); }
@@ -395,7 +493,7 @@ function renderResults(id) {
   $('#del').addEventListener('click', () => { S.walks = S.walks.filter((x) => x.id !== id); store.set('tnsWalks', S.walks); go('history'); });
   const sub = $('#submit');
   if (sub) sub.addEventListener('click', async () => {
-    sub.disabled = true; sub.textContent = 'Sending…';
+    sub.disabled = true; sub.textContent = 'Sending…'; announce('Sending to TNS.');
     try {
       // text/plain keeps this a "simple" request, which Google Apps Script accepts from any website
       const r = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(w) });
@@ -403,8 +501,9 @@ function renderResults(id) {
       if (r.ok && j.ok !== false) {
         w.submitted = Date.now(); store.set('tnsWalks', S.walks);
         sub.textContent = j.duplicate ? 'Already sent to TNS' : 'Sent to TNS. Thank you!';
-      } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; }
-    } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; }
+        tell(sub.textContent); buzz(200);
+      } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; tell(sub.textContent, true); }
+    } catch (e) { sub.textContent = 'Not sent: no connection. Tap to retry later.'; sub.disabled = false; tell(sub.textContent, true); }
   });
 }
 function download(name, text, type) {
@@ -440,7 +539,7 @@ function drawMap(el, track, species) {
 function renderHistory() {
   view.innerHTML = `<h1>My walks</h1>
     ${S.walks.length ? S.walks.map((w) => `
-      <button class="route" data-id="${esc(w.id)}">
+      <button class="route" data-id="${esc(w.id)}" aria-label="${esc(w.routeName)}, ${esc(new Date(w.start).toLocaleString('en-IN', { day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }))}, ${w.km.toFixed(1)} kilometres, ${plural(w.species.length, 'species', 'species')}${w.demo ? ', demo' : ''}">
         <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F5C43" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
         <span style="flex:1"><b>${esc(w.routeName)}</b><span class="muted">${esc(new Date(w.start).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${w.km.toFixed(1)} km</span></span>
         <span class="tag">${w.species.length} spp.${w.demo ? ' · demo' : ''}</span>
@@ -472,11 +571,25 @@ async function renderMore() {
       <p class="muted hide" id="plMsg"></p>
     </div>
     <button class="btn alt small noprint" id="print">Print QR codes</button>
+    <h2>Accessible walk QR code</h2>
+    <p class="muted">For blind and low-vision walkers. Scanning it opens the app with spoken mode, vibration and large text already on. Put a tactile sticker or a Braille label on the printed code so it can be found by touch.</p>
+    <div class="qrs"><div class="qr">${qrSvg(base + '#access', 4)}<b style="font-size:13px">Spoken mode · any route</b></div>${C.routes.map((r) => `<div class="qr">${qrSvg(base + '#access-' + r.id, 4)}<b style="font-size:13px">Spoken mode · ${esc(r.name)}</b></div>`).join('')}</div>
+    <h2 class="noprint">Accessibility</h2>
+    <div class="card noprint" style="display:flex;flex-direction:column;gap:16px">
+      <label class="toggle"><input type="checkbox" id="aVoice" ${S.settings.voice ? 'checked' : ''}><span>Spoken mode<small>The phone speaks each new bird, gives walk updates and reads the results. Works alongside TalkBack.</small></span></label>
+      <label class="toggle"><input type="checkbox" id="aRepeat" ${S.settings.repeat ? 'checked' : ''}><span>Also say a bird again when it calls later<small>At most once every 5 minutes per bird. Off: each species is said only the first time.</small></span></label>
+      <label class="f">Spoken walk update every
+        <select id="aEvery"><option value="0">Never (birds only)</option>${[5, 10, 15, 20].map((n) => `<option value="${n}" ${S.settings.every === n ? 'selected' : ''}>${n} minutes</option>`).join('')}</select></label>
+      <label class="toggle"><input type="checkbox" id="aBuzz" ${S.settings.buzz ? 'checked' : ''}><span>Vibrate<small>Two short buzzes for a new bird, one long buzz when the walk starts or finishes.</small></span></label>
+      <label class="toggle"><input type="checkbox" id="aBig" ${S.settings.big ? 'checked' : ''}><span>Larger text and buttons</span></label>
+      <label class="toggle"><input type="checkbox" id="aHc" ${S.settings.hc ? 'checked' : ''}><span>High contrast</span></label>
+      <button class="btn alt small" id="aTest">Test the voice</button>
+    </div>
     <h2 class="noprint">Settings</h2>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:14px">
       <label class="f">Your name (shown on this phone and in your walk data)<input id="nm" value="${esc(S.settings.name)}" autocomplete="name"></label>
       <label class="f">Microphone<select id="mic"><option value="">Phone's built-in mic</option></select></label>
-      <label class="f">Minimum confidence: <span id="mcv">${Math.round(S.settings.minConfidence * 100)}%</span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}"></label>
+      <label class="f">Minimum confidence: <span id="mcv" aria-hidden="true">${Math.round(S.settings.minConfidence * 100)}%</span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}" aria-valuetext="${Math.round(S.settings.minConfidence * 100)} percent"></label>
     </div>
     <a class="btn alt small noprint" href="dashboard.html" target="_blank" rel="noopener">Open the community dashboard</a>
     <div class="card noprint"><b>Model</b><p class="muted">${esc(modelText())}</p></div>
@@ -488,6 +601,11 @@ async function renderMore() {
     </div>
     <button class="btn alt small noprint" id="clear">Delete all walks on this phone</button>`;
   $('#print').addEventListener('click', () => window.print());
+  if (S.settings.every === 0) $('#aEvery').value = '0';
+  const tg = (id, key, msg) => $(id).addEventListener('change', (e) => { S.settings[key] = e.target.checked; saveSettings(); announce(msg + (e.target.checked ? ' on.' : ' off.')); if (key === 'buzz' && e.target.checked) buzz([120, 80, 120]); });
+  tg('#aVoice', 'voice', 'Spoken mode'); tg('#aBuzz', 'buzz', 'Vibration'); tg('#aBig', 'big', 'Larger text'); tg('#aHc', 'hc', 'High contrast'); tg('#aRepeat', 'repeat', 'Repeat birds');
+  $('#aEvery').addEventListener('change', (e) => { S.settings.every = +e.target.value; saveSettings(); });
+  $('#aTest').addEventListener('click', () => { if (!('speechSynthesis' in window)) { announce('This phone has no voice for the app. TalkBack still works.', true); return; } speak('Red-whiskered Bulbul, 85 percent confidence. 3 species so far.', true); });
   view.querySelectorAll('[data-delplace]').forEach((b) => b.addEventListener('click', () => {
     S.places = S.places.filter((p) => p.id !== b.dataset.delplace); store.set('tnsPlaces', S.places);
     if (S.route === b.dataset.delplace) S.route = null;
@@ -506,7 +624,7 @@ async function renderMore() {
     } else done(null, null);
   });
   $('#nm').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); store.set('tnsSettings', S.settings); });
-  $('#mc').addEventListener('input', (e) => { S.settings.minConfidence = +e.target.value; $('#mcv').textContent = Math.round(+e.target.value * 100) + '%'; store.set('tnsSettings', S.settings); });
+  $('#mc').addEventListener('input', (e) => { S.settings.minConfidence = +e.target.value; $('#mcv').textContent = Math.round(+e.target.value * 100) + '%'; e.target.setAttribute('aria-valuetext', Math.round(+e.target.value * 100) + ' percent'); store.set('tnsSettings', S.settings); });
   $('#clear').addEventListener('click', () => { if ($('#clear').dataset.sure) { S.walks = []; store.set('tnsWalks', []); renderMore(); } else { $('#clear').dataset.sure = '1'; $('#clear').textContent = 'Tap again to delete all walks'; } });
   const sel = $('#mic');
   try {
@@ -526,6 +644,7 @@ function modelText() {
 
 /* ---------- start ---------- */
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+applyDisplay();
 startWorker();
 route();
 }

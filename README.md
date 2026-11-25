@@ -50,6 +50,12 @@ Other free hosts that work the same way: Netlify (drag-and-drop the folder at ap
 2. The top QR code opens the app. Each route has its own QR code that opens the app with that route already picked.
 3. Tap **Print QR codes**, or take screenshots, and put one at each route's start point and on posters and the newsletter.
 
+## Walk anywhere, and enabling new places
+
+- **Walk anywhere** is always on the Home screen. It works on any path, with full GPS and identification.
+- **Enable a new place without editing code:** open **Share & settings > Enable a new place**, type the name (and tick "Use my current location" if you're standing there), and tap **Create QR code**. Anyone who scans that code gets the place on their Home screen, ready to walk, and their results carry the place name.
+- **Make a place permanent for everyone:** add it to `routes` in `config.js` (on GitHub, open the file and click the pencil icon, then **Commit changes**). Permanent routes show on every phone without scanning.
+
 ## Step 4: How walkers install it on Android
 
 1. Scan the QR code with the phone camera or Google Lens. It opens in Chrome.
@@ -83,3 +89,19 @@ The app shows these credits under **Share & settings**. Keep them, and use them 
 - **Needs the TNS server:** "Submit to TNS" turns on when you put the server address in `uploadUrl` in `config.js`. It sends the walk as JSON.
 - **Not yet:** recording with the screen off or the app in the background (needs the native Android build), Telugu bird names (add a Telugu column to the labels file and set `commonNameColumn`), user accounts.
 - **Tested:** the screens, walk flow, GPS and demo mode were tested in Chrome. The BirdNET+ V3.0 model itself could not be loaded in testing, so do one test walk after adding the model files. If the FP16 model won't run, use the FP32 ONNX model from the same Zenodo record.
+
+## Spoken mode for blind and low-vision walkers
+
+- **Turning it on:** open *Share & settings → Accessibility*, or tap *Turn on spoken mode* on Home. You can also scan an **Accessible walk QR code**, which turns it on straight away.
+  - The QR codes are on the *Share & settings* page.
+  - Give each printed code a tactile sticker or a Braille label so it can be found by touch.
+- **What it says:** each new bird is spoken with its confidence, for example "Red-whiskered Bulbul, 85 percent confidence. 3 species so far."
+- **Other features:**
+  - a big *Say status* button on the walk screen;
+  - a spoken walk update every 5, 10, 15 or 20 minutes;
+  - vibration when a bird is heard;
+  - large text and a high-contrast option;
+  - a spoken summary when the walk finishes;
+  - a *Read the bird list aloud* button on the results page.
+- **Screen readers:** the app works with TalkBack (Android) and VoiceOver (iPhone). Every button has a spoken label, and page changes move focus to the page title.
+- **Voice on the recording:** the phone's voice can be picked up by the mic. The app throws away stretches with human voices anyway, so it can miss a second or two of birdsong. Keep the volume low, or use wired earphones *without* a mic.
