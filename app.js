@@ -2,7 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,9 +259,21 @@ function route() {
   else if (h === 'profile' || h === 'more') renderMore();
   else if (h.startsWith('results-')) renderResults(h.slice(8));
   else renderHome();
+  fitView();
   if (h !== lastPage) { if (lastPage !== null) focusHeading(); lastPage = h; }
 }
 let lastPage = null;
+
+
+/* Home and Walk must fit the screen without scrolling. Phones differ in height and in the text size the
+   owner has set, so after drawing we hide extras step by step (t1, t2, t3) until nothing overflows. */
+function fitView() {
+  view.classList.remove('t1', 't2', 't3');
+  if (!view.classList.contains('fit')) return;
+  for (const c of ['t1', 't2', 't3']) { if (view.scrollHeight <= view.clientHeight + 1) break; view.classList.add(c); }
+}
+let fitTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitView, 150); });
 
 /* ---------- home ---------- */
 /* Sound trace: one column per second of sound level, mirrored around a centre line, with a turmeric mark
@@ -1080,3 +1092,7 @@ if (S.recover) setTimeout(() => tell('Your walk was interrupted, but it was save
 startWorker();
 route();
 }
+
+/* re-fit after any direct redraw of Home or Walk (voice toggle, install prompt, spoken mode) */
+renderHome = ((f) => function () { f.apply(this, arguments); fitView(); })(renderHome);
+renderWalk = ((f) => function () { f.apply(this, arguments); fitView(); })(renderWalk);
