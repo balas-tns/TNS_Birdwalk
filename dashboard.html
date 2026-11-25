@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#1F5C43">
+<meta name="theme-color" content="#154734">
 <title>TNS Bird Walk dashboard</title>
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Noto+Sans+Telugu:wght@700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&family=Ramabhadra&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css">
 <style>
-/* VOICE calm field-notebook report · IDEA a society's monthly bird register · PICTURE the map of where birds were heard
-   COLOUR forest green ground band, white cards, ochre accent · TYPE Manrope · LAYOUT finding first, then map, then tables */
-:root{--g:#1F5C43;--g2:#143D2C;--mint:#E3EEE7;--bg:#F3F5EF;--ink:#17251E;--mut:#55635B;--och:#8A5200;--ochBg:#FCEFD8;--line:#E6EBE6;--card:#fff}
+/* Matches the walker app (v16): Seshachalam forest and morning paper, turmeric for birds heard,
+   Atkinson Hyperlegible Next for reading, Ramabhadra for the Telugu wordmark. */
+:root{--g:#154734;--g2:#0E3324;--mint:#DCE7DE;--bg:#F4F7F2;--ink:#11261B;--mut:#4F6157;--och:#4A3800;--ochBg:#FFF3CC;--line:#D5DFD7;--card:#fff;--tur:#F2B705}
 *{box-sizing:border-box;min-width:0}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Manrope,system-ui,sans-serif;overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 'Atkinson Hyperlegible Next','Atkinson Hyperlegible',system-ui,sans-serif;font-variant-numeric:tabular-nums;overflow-x:clip}
 a{color:var(--g)}
 header{background:var(--g);color:#fff}
 .wrap{max-width:1240px;margin:0 auto;padding:0 max(4vw,16px)}
 .top{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;justify-content:space-between;padding:18px 0}
-.brand b{font-family:'Noto Sans Telugu',Manrope,sans-serif;font-size:22px;display:block}
-.brand span{font-size:12px;font-weight:700;opacity:.9}
+.brand b{font-family:Ramabhadra,'Noto Sans Telugu',sans-serif;font-weight:400;font-size:28px;line-height:1.1;display:block}
+.brand span{font-size:15px;color:#CFE3D6}
 .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .seg{display:flex;background:rgba(255,255,255,.14);border-radius:12px;padding:3px}
 .seg button{all:unset;cursor:pointer;padding:8px 14px;border-radius:9px;font-size:14px;font-weight:700;color:#fff}
@@ -27,7 +27,7 @@ header{background:var(--g);color:#fff}
 select,input[type=search],input[type=password]{font:inherit;font-size:16px;padding:9px 12px;border-radius:12px;border:1px solid #C9D3CC;background:#fff;color:var(--ink)}
 header select{border:0}
 .chk{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600}
-.chk input{width:20px;height:20px;accent-color:var(--och)}
+.chk input{width:20px;height:20px;accent-color:var(--tur)}
 main{padding:26px 0 48px;display:flex;flex-direction:column;gap:20px}
 h1{font-size:clamp(26px,3.4vw,40px);line-height:1.08;margin:0;text-wrap:balance}
 h2{font-size:18px;margin:0}
@@ -36,7 +36,7 @@ h2{font-size:18px;margin:0}
 .banner.err{background:#FBE4E2;color:#7A1C16}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
 .tile{background:var(--card);border-radius:18px;padding:16px 18px}
-.tile span{display:block;font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.02em}
+.tile span{display:block;font-size:15px;font-weight:700;color:var(--mut)}
 .tile b{font-size:clamp(26px,3vw,34px);font-variant-numeric:tabular-nums}
 .tile small{display:block;font-size:12px;color:var(--mut)}
 .row{display:flex;flex-wrap:wrap;gap:20px}
@@ -61,11 +61,11 @@ td i{color:var(--mut)}
 .btn{all:unset;cursor:pointer;padding:9px 14px;border-radius:10px;font-size:14px;font-weight:700;background:var(--g);color:#fff;text-align:center;min-height:24px}
 .btn.alt{background:#fff;color:var(--ink);border:2px solid #C9D3CC}
 .btn[disabled]{opacity:.45;pointer-events:none}
-.btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--och);outline-offset:2px}
+.btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--g);outline-offset:3px}
 .acts{display:flex;gap:8px;flex-wrap:wrap}
 .empty{color:var(--mut);font-size:14px;padding:12px 0}
-.play{all:unset;cursor:pointer;width:40px;height:40px;border-radius:20px;background:var(--mint);display:inline-grid;place-items:center;flex:none}
-.play:focus-visible{outline:3px solid var(--och);outline-offset:2px}
+.play{all:unset;cursor:pointer;width:40px;height:40px;border-radius:20px;background:var(--g);display:inline-grid;place-items:center;flex:none}
+.play:focus-visible{outline:3px solid var(--g);outline-offset:3px}
 .play[disabled]{opacity:.4;cursor:default}
 footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 24px}
 @media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;font-size:12px;color:var(--mut)}.stack td:empty{display:none}#map{height:320px}}
@@ -75,7 +75,7 @@ footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:w
 <body>
 <header>
   <div class="wrap top">
-    <div class="brand"><b>పిట్ట పాట</b><span>TNS BIRD WALK · COMMUNITY DASHBOARD</span></div>
+    <div class="brand"><b lang="te">బర్డ్ వాక్</b><span>TNS bird walk community dashboard</span></div>
     <div class="filters">
       <div class="seg" role="group" aria-label="Period" id="period">
         <button data-p="7" aria-pressed="false">7 days</button><button data-p="30" aria-pressed="true">30 days</button><button data-p="all" aria-pressed="false">All time</button>
@@ -113,7 +113,7 @@ footer{font-size:12px;color:var(--mut);padding:0 0 40px;display:flex;flex-wrap:w
     <section class="card side"><h2>Recent walks</h2><div class="scroll"><table class="stack" id="recent"></table></div></section>
   </div>
 </main>
-<footer><span>Tirupati Nature Society · sound identification by BirdNET+ V3.0 (Lasseck, Eibl, Klinck &amp; Kahl, 2026), Apache License 2.0 · built on the BirdNET Live app (Kahl et al., 2026)</span><span><span id="updated"></span> · dashboard v12</span></footer>
+<footer><span>Tirupati Nature Society. Sound identification by BirdNET+ V3.0 (Lasseck, Eibl, Klinck &amp; Kahl, 2026), Apache License 2.0. Built on the BirdNET Live app (Kahl et al., 2026).</span><span><span id="updated"></span>, dashboard v16</span></footer>
 </div>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
@@ -125,8 +125,8 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const yes = (v) => v === true || v === 'TRUE' || v === 'true';
 const num = (v) => Number(v) || 0;
-const GROUP_COL = { 'Birds': '#1F5C43', 'Frogs & toads': '#2E7FB8', 'Insects': '#B86E00', 'Mammals': '#8A3B5C', 'Reptiles': '#6B5B2E' };
-const colour = (g) => GROUP_COL[g] || '#55635B';
+const GROUP_COL = { 'Birds': '#154734', 'Frogs & toads': '#2E7FB8', 'Insects': '#B86E00', 'Mammals': '#8A3B5C', 'Reptiles': '#6B5B2E' };
+const colour = (g) => GROUP_COL[g] || '#4F6157';
 const day = (s) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 let DATA = null, SAMPLE = false, period = '30', placeF = '', showDemo = false, query = '', map = null, mapReady = false, mapPts = [];
 
@@ -196,18 +196,18 @@ function render() {
   const queue = rows.filter((s) => s.status === 'needs review');
   const label = period === 'all' ? 'all time' : 'the last ' + period + ' days';
   $('#title').textContent = walks.length ? `${list.length} species heard on ${walks.length} walks` : 'No walks in this period yet';
-  $('#subtitle').textContent = `${placeF || 'All places'} · ${label}${SAMPLE ? ' · sample data' : ''}`;
+  $('#subtitle').textContent = `${placeF || 'All places'}, ${label}${SAMPLE ? ' (sample data)' : ''}`;
   if (SAMPLE && !$('#notice').innerHTML) $('#notice').innerHTML = '<p class="banner">Sample data. Set up the Google Sheet (SETUP-DASHBOARD.md) and put its address in config.js to see real walks.</p>';
   $('#tiles').innerHTML = [
-    ['WALKS', walks.length, 'submitted from the app'], ['WALKERS', walkers.size, 'who gave their name'],
-    ['SPECIES', list.length, 'accepted or confirmed'], ['KM WALKED', km.toFixed(1), 'along all routes'],
-    ['TO REVIEW', queue.length, 'waiting for an expert']
+    ['Walks', walks.length, 'submitted from the app'], ['Walkers', walkers.size, 'who gave their name'],
+    ['Species', list.length, 'accepted or confirmed'], ['Km walked', km.toFixed(1), 'on all walks'],
+    ['To review', queue.length, 'waiting for an expert']
   ].map(([a, b, c]) => `<div class="tile"><span>${a}</span><b>${esc(b)}</b><small>${c}</small></div>`).join('');
   $('#top').innerHTML = list.length ? list.slice(0, 10).map((s) => `<div class="bar"><div><span>${esc(s.common)}</span><span>${Math.round(s.pct * 100)}%</span></div><em><i style="width:${(s.pct * 100).toFixed(1)}%"></i></em></div>`).join('') : '<p class="empty">No accepted records yet.</p>';
   renderMap(ok);
   const q = query.toLowerCase(), shown = list.filter((s) => !q || (s.common + ' ' + s.sci).toLowerCase().includes(q));
   $('#spTable').innerHTML = `<tr><th>Listen</th><th>Species</th><th>Group</th><th class="n">Walks</th><th class="n">Calls</th><th class="n">Best</th><th class="n">Last heard</th></tr>` +
-    (shown.length ? shown.map((s) => `<tr><td>${s.clip ? `<button class="play" data-clip="${esc(s.clip)}" aria-label="Play the clearest clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#1F5C43" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td><span class="pill" style="color:${colour(s.group)}">${esc(s.group || '—')}</span></td><td class="n">${s.n}</td><td class="n">${s.calls}</td><td class="n">${Math.round(s.best * 100)}%</td><td class="n">${esc(day(s.last))}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">No species match.</td></tr>');
+    (shown.length ? shown.map((s) => `<tr><td>${s.clip ? `<button class="play" data-clip="${esc(s.clip)}" aria-label="Play the clearest clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td><span class="pill" style="color:${colour(s.group)}">${esc(s.group || '—')}</span></td><td class="n">${s.n}</td><td class="n">${s.calls}</td><td class="n">${Math.round(s.best * 100)}%</td><td class="n">${esc(day(s.last))}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">No species match.</td></tr>');
   const group = (key) => {
     const m = new Map();
     walks.forEach((w) => { const k = key(w); const o = m.get(k) || { k, walks: 0, km: 0, ids: new Set() }; o.walks++; o.km += num(w.km); o.ids.add(String(w.walk_id)); m.set(k, o); });
@@ -216,7 +216,7 @@ function render() {
   $('#places').innerHTML = `<tr><th>Place</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.place || 'Unnamed').map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
   $('#walkers').innerHTML = `<tr><th>Walker</th><th class="n">Walks</th><th class="n">Species</th><th class="n">Km</th></tr>` + (walks.length ? group((w) => w.walker || 'Walkers without a name').slice(0, 15).map((o) => `<tr><td>${esc(o.k)}</td><td class="n">${o.walks}</td><td class="n">${o.sp}</td><td class="n">${o.km.toFixed(1)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No walks yet.</td></tr>');
   const qrows = queue.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 60);
-  $('#review').innerHTML = `<tr><th>Listen</th><th>Species</th><th>Walk</th><th class="n">Confidence</th><th>Decision</th></tr>` + (qrows.length ? qrows.map((s, i) => `<tr><td>${s.clip_file_id ? `<button class="play" data-clip="${esc(s.clip_file_id)}" aria-label="Play the clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#1F5C43" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td>${esc(s.place)}<br><i>${esc(day(s.start))}${s.walker ? ' · ' + esc(s.walker) : ''}</i></td><td class="n">${Math.round(num(s.best_confidence) * 100)}%</td><td><div class="acts"><button class="btn" data-rv="${i}" data-st="confirmed">Confirm</button><button class="btn alt" data-rv="${i}" data-st="rejected">Reject</button></div></td></tr>`).join('') : '<tr><td colspan="5" class="empty">Nothing waiting for review.</td></tr>');
+  $('#review').innerHTML = `<tr><th>Listen</th><th>Species</th><th>Walk</th><th class="n">Confidence</th><th>Decision</th></tr>` + (qrows.length ? qrows.map((s, i) => `<tr><td>${s.clip_file_id ? `<button class="play" data-clip="${esc(s.clip_file_id)}" aria-label="Play the clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td>${esc(s.place)}<br><i>${esc(day(s.start))}${s.walker ? ', ' + esc(s.walker) : ''}</i></td><td class="n">${Math.round(num(s.best_confidence) * 100)}%</td><td><div class="acts"><button class="btn" data-rv="${i}" data-st="confirmed">Confirm</button><button class="btn alt" data-rv="${i}" data-st="rejected">Reject</button></div></td></tr>`).join('') : '<tr><td colspan="5" class="empty">Nothing waiting for review.</td></tr>');
   document.querySelectorAll('[data-clip]').forEach((b) => b.addEventListener('click', () => playClip(b.dataset.clip, b)));
   document.querySelectorAll('[data-rv]').forEach((b) => b.addEventListener('click', () => decide(qrows[+b.dataset.rv], b.dataset.st, b)));
   const recent = walks.slice().sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 10);
@@ -237,7 +237,7 @@ function renderMap(ok) {
   let a = 90, b = -90, c = 180, d = -180;
   pts.forEach((s) => { a = Math.min(a, num(s.lat)); b = Math.max(b, num(s.lat)); c = Math.min(c, num(s.lon)); d = Math.max(d, num(s.lon)); });
   const k = Math.cos(((a + b) / 2) * Math.PI / 180), sc = Math.min((W - 40) / Math.max((d - c) * k, 1e-4), (H - 40) / Math.max(b - a, 1e-4));
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${pts.map((s) => `<circle cx="${(W / 2 + (num(s.lon) - (c + d) / 2) * k * sc).toFixed(1)}" cy="${(H / 2 - (num(s.lat) - (a + b) / 2) * sc).toFixed(1)}" r="5" fill="${colour(s.group)}" fill-opacity=".8" stroke="#fff" stroke-width="1.2"><title>${esc(s.common)} · ${esc(s.place)}</title></circle>`).join('')}</svg>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${pts.map((s) => `<circle cx="${(W / 2 + (num(s.lon) - (c + d) / 2) * k * sc).toFixed(1)}" cy="${(H / 2 - (num(s.lat) - (a + b) / 2) * sc).toFixed(1)}" r="5" fill="${colour(s.group)}" fill-opacity=".8" stroke="#fff" stroke-width="1.2"><title>${esc(s.common)}, ${esc(s.place)}</title></circle>`).join('')}</svg>`;
 }
 
 /* MapLibre map: free OpenFreeMap street style, no key needed. Set mapStyle in config.js to use another style. */
@@ -262,7 +262,7 @@ function drawMapLibre() {
     map.addLayer({ id: 'rec', type: 'circle', source: 'rec', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 4, 15, 8], 'circle-color': ['get', 'col'], 'circle-opacity': .85, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 } });
     map.on('click', 'rec', (e) => {
       const p = e.features[0].properties;
-      new maplibregl.Popup({ offset: 8 }).setLngLat(e.lngLat).setHTML(`<b>${esc(p.common)}</b><br><i>${esc(p.sci)}</i><br>${esc(p.place)} · ${esc(p.when)}`).addTo(map);
+      new maplibregl.Popup({ offset: 8 }).setLngLat(e.lngLat).setHTML(`<b>${esc(p.common)}</b><br><i>${esc(p.sci)}</i><br>${esc(p.place)}, ${esc(p.when)}`).addTo(map);
     });
     map.on('mouseenter', 'rec', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'rec', () => { map.getCanvas().style.cursor = ''; });
