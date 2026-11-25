@@ -2,7 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v14';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -15,7 +15,7 @@ const store = {
 const S = {
   model: 'loading',           // loading | ready | demo | error
   modelMsg: '', info: null, labels: [], geoOk: false, geoAllowed: null,
-  route: null, walk: null, lastWalk: null, deferredInstall: null,
+  route: null, walk: null, lastWalk: null, deferredInstall: null, walkName: '',
   settings: Object.assign({ name: '', deviceId: '', minConfidence: C.minConfidence, voice: false, buzz: false, big: false, hc: false, every: 10, repeat: false, lang: 'en-IN', sendClips: true }, store.get('tnsSettings', {})),
   walks: store.get('tnsWalks', []),
   places: store.get('tnsPlaces', [])        // places added on this phone or scanned from a place QR code
@@ -204,7 +204,7 @@ function route() {
       if (ll) { const [a, b] = ll.split(',').map(Number); if (isFinite(a) && isFinite(b)) { lat = a; lon = b; } }
     } catch (e) {}
     const p = addPlace(name, lat, lon);
-    if (p) { S.route = p.id; setTimeout(() => say('ready', [p.name]), 800); }
+    if (p) { S.route = p.id; S.walkName = p.name; setTimeout(() => say('ready', [p.name]), 800); }
     location.replace('#home');
     return;
   }
@@ -217,7 +217,7 @@ function route() {
   }
   if (h.startsWith('route-')) {
     const r = C.routes.find((x) => x.id === h.slice(6));
-    if (r) { S.route = r.id; setTimeout(() => say('ready', [r.name]), 800); }
+    if (r) { S.route = r.id; S.walkName = r.name; setTimeout(() => say('ready', [r.name]), 800); }
     location.replace('#home');
     return;
   }
@@ -256,7 +256,7 @@ function renderHome() {
       <div class="stats"><div><b>${total}</b><span>walks</span></div><div><b>${species.size}</b><span>species</span></div></div>
       ${S.settings.voice ? '' : '<button class="btn alt small" id="a11yOn" style="background:#fff">Turn on spoken mode (for blind and low-vision walkers)</button>'}
     </section>
-    <h2>Choose a route or place</h2>
+    ${allRoutes().length > 1 ? `<h2>Choose a route or place</h2>
     <div style="display:flex;flex-direction:column;gap:10px">
       ${allRoutes().map((r) => `
         <button class="route" data-route="${esc(r.id)}" aria-pressed="${S.route === r.id}" aria-label="${esc(r.name)}. ${esc(r.meta)}. ${esc(r.tag)}">
@@ -264,12 +264,20 @@ function renderHome() {
           <span style="flex:1"><b>${esc(r.name)}</b><span class="muted">${esc(r.meta)}</span></span>
           <span class="tag">${esc(r.tag)}</span>
         </button>`).join('')}
+    </div>` : ''}
+    <div class="card" style="display:flex;flex-direction:column;gap:14px">
+      <label class="f">Walk name<input id="wName" maxlength="60" list="wNames" autocomplete="off" placeholder="e.g. Talakona waterfall trail" value="${esc(S.walkName)}"></label>
+      <datalist id="wNames">${[...new Set(S.walks.map((w) => w.routeName).filter((n) => n && n !== ANYWHERE.name))].slice(0, 15).map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>
+      <label class="f"><span>Your name <span class="muted" style="font-weight:600">(optional)</span></span><input id="wWalker" maxlength="60" autocomplete="name" placeholder="Shown on the TNS dashboard" value="${esc(S.settings.name)}"></label>
     </div>
     <p class="card muted">${S.settings.voice ? 'Spoken mode is on. Start the walk, then keep the phone in a shirt pocket or on a lanyard with the microphone facing out. The phone tells you each new bird it hears. Double-tap the Say status button at any time.' : 'Best between 6:00 and 8:30 am. Hold the phone out of your pocket with the screen on, walk slowly, and stop for a minute every 200 m.'}</p>
-    <button class="btn" id="start" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}>${S.model === 'loading' ? 'Loading the bird model…' : S.route ? 'Start walk' : 'Pick a route or Walk anywhere'}</button>
+    <button class="btn" id="start" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}>${S.model === 'loading' ? 'Loading the bird model…' : S.route ? 'Start walk' : 'Pick a place above'}</button>
     ${S.deferredInstall ? '<button class="btn alt" id="install">Install the app on this phone</button>' : ''}`;
   view.querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => {
-    S.route = b.dataset.route; renderHome();
+    S.route = b.dataset.route;
+    const picked = allRoutes().find((x) => x.id === S.route);
+    if (picked && picked.id !== ANYWHERE.id) S.walkName = picked.name;
+    renderHome();
     const again = view.querySelector(`[data-route="${CSS.escape(S.route)}"]`); if (again) again.focus();
     const r = allRoutes().find((x) => x.id === S.route);
     say('selected', [r ? r.name : 'Route']);
@@ -280,6 +288,8 @@ function renderHome() {
     speak(P('modeOn', S.settings.every), true);
   });
   const st = $('#start'); if (st) st.addEventListener('click', () => startWalk());
+  $('#wName').addEventListener('input', (e) => { S.walkName = e.target.value; });
+  $('#wWalker').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); saveSettings(); });
   const rc = $('#recContinue'); if (rc) rc.addEventListener('click', () => startWalk(S.recover));
   const rf = $('#recFinish'); if (rf) rf.addEventListener('click', () => finishRecovered());
   const ins = $('#install');
@@ -319,7 +329,7 @@ async function startWalk(prev) {
   } else {
     if (S.recover) { const old = S.recover; S.recover = null; old.active = false; old.end = old.savedAt || now; if (old.demo && !Object.keys(old.species || {}).length) addDemo(old); saveWalk(old); }
     S.walk = {
-    id: String(now), active: true, paused: false, route: r.id, routeName: r.name, start: now, end: null,
+    id: String(now), active: true, paused: false, route: r.id, routeName: (S.walkName || '').trim().slice(0, 60) || r.name, walker: S.settings.name || '', start: now, end: null,
     demo: S.model === 'demo', model: S.model === 'ready' ? 'BirdNET+ V3.0' : 'demo', track: [], detections: [],
     species: {}, humanWindows: 0, windows: 0, anchors: [{ audioSec: 0, wall: now }], sentSec: 0, level: new Array(32).fill(0.05),
     pausedMs: 0, pausedAt: null, pending: 0, geoUsed: false, geoSent: false, errors: 0
@@ -641,7 +651,7 @@ function summarise(w) {
   const step = Math.max(1, Math.ceil(w.track.length / 600));
   return {
     id: w.id, route: w.route, routeName: w.routeName, start: w.start, end: w.end, demo: w.demo, model: w.model,
-    walker: S.settings.name || null, km: +km(w.track).toFixed(2), humanWindowsRemoved: w.humanWindows, geoFilter: w.geoUsed,
+    walker: (w.walker != null ? w.walker : S.settings.name) || null, km: +km(w.track).toFixed(2), humanWindowsRemoved: w.humanWindows, geoFilter: w.geoUsed,
     species: Object.values(w.species).sort((a, b) => b.count - a.count).map((s) => ({
       sci: s.sci, common: s.common, group: s.group, count: s.count, best: +s.best.toFixed(3), review: reviewFlag(s, S.geoAllowed),
       firstHeard: Math.round(s.t), lat: s.lat, lon: s.lon, estimated: s.est
@@ -690,6 +700,11 @@ function renderResults(id) {
         </div>`;
       }).join('') : '<p class="empty">Nothing in this group.</p>'}
     </div>
+    ${w.submitted ? '' : `<div class="card noprint" style="display:flex;flex-direction:column;gap:14px">
+      <label class="f">Walk name<input id="rName" maxlength="60" value="${esc(w.routeName)}"></label>
+      <label class="f"><span>Your name <span class="muted" style="font-weight:600">(optional)</span></span><input id="rWalker" maxlength="60" autocomplete="name" value="${esc(w.walker || '')}"></label>
+      <p class="muted">You can correct these until you submit.</p>
+    </div>`}
     <div style="display:flex;flex-direction:column;gap:10px" class="noprint">
       ${C.uploadUrl ? (w.submitted ? '<p class="banner">Sent to TNS on ' + esc(new Date(w.submitted).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + '.</p>' + (!w.clipsDone && !w.demo && S.settings.sendClips ? '<button class="btn alt small" id="resendClips">Send the sound clips now</button>' : '') : '<button class="btn" id="submit">' + (w.demo ? 'Submit to TNS (marked as demo)' : 'Submit to TNS') + '</button>') : '<p class="muted">Submitting to TNS turns on once the TNS server address is set in config.js.</p>'}
       <div class="row"><button class="btn alt small" id="dlJson">Download walk data</button><button class="btn alt small" id="dlGpx">Download route (GPX)</button></div>
@@ -722,6 +737,9 @@ function renderResults(id) {
     rc.textContent = r.error ? `${r.sent} of ${r.total} clips sent: ${r.error}. Tap to try again.` : 'Sound clips sent to TNS.'; rc.disabled = !r.error;
     announce(rc.textContent);
   });
+  const rn = $('#rName'), rw = $('#rWalker');
+  if (rn) rn.addEventListener('change', () => { w.routeName = rn.value.trim().slice(0, 60) || ANYWHERE.name; store.set('tnsWalks', S.walks); announce('Walk name saved.'); });
+  if (rw) rw.addEventListener('change', () => { w.walker = rw.value.trim().slice(0, 60) || null; if (w.walker) { S.settings.name = w.walker; saveSettings(); } store.set('tnsWalks', S.walks); announce('Name saved.'); });
   const sub = $('#submit');
   if (sub) sub.addEventListener('click', async () => {
     sub.disabled = true; sub.textContent = 'Sending…'; announce('Sending to TNS.');
