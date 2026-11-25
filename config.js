@@ -37,10 +37,8 @@ window.TNS_CONFIG = {
   // Leave null until it's set up; the dashboard then shows sample data.
   uploadUrl: 'https://script.google.com/macros/s/AKfycbwQpiXEyfQ38HWcZVDuKGPSVXzlKE8MtJmXRnxGJIsxPeV7atavy6vvBrcq76IUy1OGsw/exec',
 
-  // Fixed TNS routes. Print a QR code for each one (More > Share) and put it at the start point.
-  routes: [
-    { id: 'kapila', name: 'Kapila Theertham foothill trail', meta: '2.4 km · about 45 min', tag: 'Hills' },
-    { id: 'svu', name: 'SV University campus loop', meta: '1.8 km · about 35 min', tag: 'Campus' },
-    { id: 'lake', name: 'Lake edge walk', meta: '2.0 km · about 40 min', tag: 'Wetland' }
-  ]
+  // Fixed TNS routes (none for now: walkers use "Walk anywhere", and new places are enabled
+  // from Share & settings). To bring a route back, add a line like this inside the brackets:
+  //   { id: 'kapila', name: 'Kapila Theertham foothill trail', meta: '2.4 km · about 45 min', tag: 'Hills' }
+  routes: []
 };

@@ -2,6 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
+const APP_VERSION = 'v12';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -832,6 +833,7 @@ async function renderMore() {
       <label class="f">Minimum confidence: <span id="mcv" aria-hidden="true">${Math.round(S.settings.minConfidence * 100)}%</span><input type="range" id="mc" min="0.1" max="0.9" step="0.05" value="${S.settings.minConfidence}" aria-valuetext="${Math.round(S.settings.minConfidence * 100)} percent"></label>
     </div>
     <a class="btn alt small noprint" href="dashboard.html" target="_blank" rel="noopener">Open the community dashboard</a>
+    <div class="card noprint"><b>App version</b><p class="muted">TNS Bird Walk ${APP_VERSION} · ${(C.routes || []).length} fixed routes in config.js</p></div>
     <div class="card noprint"><b>Model</b><p class="muted">${esc(modelText())}</p></div>
     <div class="card noprint" style="display:flex;flex-direction:column;gap:8px">
       <b>Credits</b>
