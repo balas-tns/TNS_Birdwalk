@@ -21,7 +21,7 @@ const S = {
 };
 const ANYWHERE = { id: 'free', name: 'Walk anywhere', meta: 'Any place, any path, any length', tag: 'Open' };
 const slug = (t) => t.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'place';
-const allRoutes = () => C.routes.concat(S.places, [ANYWHERE]);
+const allRoutes = () => (C.routes || []).concat(S.places, [ANYWHERE]);
 
 /* ---------- accessibility: screen reader, speech, vibration, display ---------- */
 let srTimer = null;
@@ -234,6 +234,7 @@ let lastPage = null;
 
 /* ---------- home ---------- */
 function renderHome() {
+  if (!S.route && allRoutes().length === 1) S.route = ANYWHERE.id;      // only Walk anywhere: pick it for the walker
   const total = S.walks.length, species = new Set();
   S.walks.forEach((w) => w.species.forEach((s) => species.add(s.sci)));
   const notice = S.model === 'demo'
@@ -451,12 +452,13 @@ async function uploadClips(w, progress) {             // after the walk itself i
       const data = await toBase64(r.blob);
       const res = await fetch(C.uploadUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'clip', walk_id: w.id, sci: r.sci, common: r.common, start: w.start, score: r.score, mime: 'audio/wav', data }) });
-      const j = await res.json();
-      if (!j.ok) throw new Error(j.error || 'not saved');
+      let j;
+      try { j = await res.json(); } catch (x) { throw new Error('the TNS script sent back an error page; check it is deployed and allowed to use Google Drive'); }
+      if (!j.ok) throw new Error(j.error === 'Missing walk data' ? 'the TNS script is still the old version; deploy the new Code.gs as a new version' : (j.error || 'not saved'));
       r.sent = true; r.fileId = j.file_id;
       await clipTx('readwrite', (st) => st.put(r));
       sent++;
-    } catch (e) { return { sent, total: rows.length, error: e.message }; }
+    } catch (e) { return { sent, total: rows.length, error: navigator.onLine ? e.message : 'no signal' }; }
   }
   w.clipsDone = true; store.set('tnsWalks', S.walks);
   return { sent, total: rows.length };
@@ -716,7 +718,7 @@ function renderResults(id) {
   if (rc) rc.addEventListener('click', async () => {
     rc.disabled = true;
     const r = await uploadClips(w, (n, t) => { rc.textContent = `Sending sound clips ${n + 1} of ${t}…`; });
-    rc.textContent = r.error ? `${r.sent} of ${r.total} clips sent. Tap to try again.` : 'Sound clips sent to TNS.'; rc.disabled = !r.error;
+    rc.textContent = r.error ? `${r.sent} of ${r.total} clips sent: ${r.error}. Tap to try again.` : 'Sound clips sent to TNS.'; rc.disabled = !r.error;
     announce(rc.textContent);
   });
   const sub = $('#submit');
@@ -733,7 +735,7 @@ function renderResults(id) {
           uploading = true;
           const c = await uploadClips(w, (n, t) => { sub.textContent = `Walk sent. Sending sound clips ${n + 1} of ${t}…`; });
           uploading = false;
-          sub.textContent = c.error ? `${done} ${c.sent} of ${c.total} sound clips sent; the rest will go when there is signal.` : c.total ? `${done} ${c.total} sound ${c.total === 1 ? 'clip' : 'clips'} included.` : done;
+          sub.textContent = c.error ? `${done} ${c.sent} of ${c.total} sound clips sent (${c.error}). They will be tried again later.` : c.total ? `${done} ${c.total} sound ${c.total === 1 ? 'clip' : 'clips'} included.` : done;
         } else sub.textContent = done;
         announce(sub.textContent); speak(P('sent')); buzz(200);
       } else { sub.textContent = 'Not sent: ' + (j.error || 'server said ' + r.status) + '. Tap to retry.'; sub.disabled = false; announce(sub.textContent, true); speak(P('notSent')); }
@@ -792,9 +794,9 @@ async function renderMore() {
   view.innerHTML = `
     <h1>Share &amp; settings</h1>
     <div class="qr"><div>${qrSvg(base, 6)}</div><b>Scan to open TNS Bird Walk</b><span class="muted" style="word-break:break-all">${esc(base)}</span></div>
-    <h2>Route QR codes</h2>
+    ${C.routes.length ? `<h2>Route QR codes</h2>
     <p class="muted">Print these and put each one at its start point. Scanning opens the app with that route already picked.</p>
-    <div class="qrs">${C.routes.map((r) => `<div class="qr">${qrSvg(base + '#route-' + r.id, 4)}<b style="font-size:13px">${esc(r.name)}</b></div>`).join('')}</div>
+    <div class="qrs">${C.routes.map((r) => `<div class="qr">${qrSvg(base + '#route-' + r.id, 4)}<b style="font-size:13px">${esc(r.name)}</b></div>`).join('')}</div>` : ''}
     ${S.places.length ? `<h2>Place QR codes</h2><div class="qrs">${S.places.map((p) => `<div class="qr">${qrSvg(placeLink(base, p), 4)}<b style="font-size:13px">${esc(p.name)}</b><button class="chip noprint" data-delplace="${esc(p.id)}">Remove</button></div>`).join('')}</div>` : ''}
     <div class="card noprint" style="display:flex;flex-direction:column;gap:10px">
       <b>Enable a new place</b>

@@ -2,7 +2,7 @@
    App files: fetched fresh whenever the phone is online, so walkers get updates automatically.
    Model files: downloaded once and kept. Change MODEL_CACHE only when you upload a new model,
    because every phone then downloads the ~75 MB model again. */
-const VERSION = 'tns-birdwalk-v9';
+const VERSION = 'tns-birdwalk-v11';
 const MODEL_CACHE = 'tns-model-v1';
 const SHELL = ['./', 'index.html', 'app.js', 'worker.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'names/te.csv', 'names/hi.csv', 'names/ta.csv'];
 

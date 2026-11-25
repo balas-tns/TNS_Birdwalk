@@ -178,8 +178,9 @@ function bySpecies(ok, walkCount) {
   const m = new Map();
   ok.forEach((s) => {
     const k = s.sci || s.common;
-    const o = m.get(k) || { sci: s.sci, common: s.common, group: s.group, walks: new Set(), calls: 0, best: 0, last: '' };
+    const o = m.get(k) || { sci: s.sci, common: s.common, group: s.group, walks: new Set(), calls: 0, best: 0, last: '', clip: '', clipConf: -1 };
     o.walks.add(String(s.walk_id)); o.calls += num(s.calls); o.best = Math.max(o.best, num(s.best_confidence));
+    if (s.clip_file_id && num(s.best_confidence) > o.clipConf) { o.clip = String(s.clip_file_id); o.clipConf = num(s.best_confidence); }   // the clearest clip for this species
     if (s.start > o.last) o.last = s.start;
     m.set(k, o);
   });
@@ -205,8 +206,8 @@ function render() {
   $('#top').innerHTML = list.length ? list.slice(0, 10).map((s) => `<div class="bar"><div><span>${esc(s.common)}</span><span>${Math.round(s.pct * 100)}%</span></div><em><i style="width:${(s.pct * 100).toFixed(1)}%"></i></em></div>`).join('') : '<p class="empty">No accepted records yet.</p>';
   renderMap(ok);
   const q = query.toLowerCase(), shown = list.filter((s) => !q || (s.common + ' ' + s.sci).toLowerCase().includes(q));
-  $('#spTable').innerHTML = `<tr><th>Species</th><th>Group</th><th class="n">Walks</th><th class="n">Calls</th><th class="n">Best</th><th class="n">Last heard</th></tr>` +
-    (shown.length ? shown.map((s) => `<tr><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td><span class="pill" style="color:${colour(s.group)}">${esc(s.group || '—')}</span></td><td class="n">${s.n}</td><td class="n">${s.calls}</td><td class="n">${Math.round(s.best * 100)}%</td><td class="n">${esc(day(s.last))}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">No species match.</td></tr>');
+  $('#spTable').innerHTML = `<tr><th>Listen</th><th>Species</th><th>Group</th><th class="n">Walks</th><th class="n">Calls</th><th class="n">Best</th><th class="n">Last heard</th></tr>` +
+    (shown.length ? shown.map((s) => `<tr><td>${s.clip ? `<button class="play" data-clip="${esc(s.clip)}" aria-label="Play the clearest clip of ${esc(s.common)}"><svg width="16" height="16" viewBox="0 0 24 24" fill="#1F5C43" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>` : '<span class="sub" style="font-size:12px">no clip</span>'}</td><td><b>${esc(s.common)}</b><br><i>${esc(s.sci)}</i></td><td><span class="pill" style="color:${colour(s.group)}">${esc(s.group || '—')}</span></td><td class="n">${s.n}</td><td class="n">${s.calls}</td><td class="n">${Math.round(s.best * 100)}%</td><td class="n">${esc(day(s.last))}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">No species match.</td></tr>');
   const group = (key) => {
     const m = new Map();
     walks.forEach((w) => { const k = key(w); const o = m.get(k) || { k, walks: 0, km: 0, ids: new Set() }; o.walks++; o.km += num(w.km); o.ids.add(String(w.walk_id)); m.set(k, o); });
