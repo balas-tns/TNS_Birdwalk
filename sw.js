@@ -2,7 +2,7 @@
    App files: fetched fresh whenever the phone is online, so walkers get updates automatically.
    Model files: downloaded once and kept. Change MODEL_CACHE only when you upload a new model,
    because every phone then downloads the ~75 MB model again. */
-const VERSION = 'tns-birdwalk-v20';
+const VERSION = 'tns-birdwalk-v23';
 const MODEL_CACHE = 'tns-model-v1';
 const SHELL = ['./', 'index.html', 'app.js', 'worker.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'names/te.csv', 'names/hi.csv', 'names/ta.csv'];
 
@@ -25,14 +25,15 @@ self.addEventListener('fetch', (e) => {
       const hit = await c.match(req);
       if (hit) return hit;
       const res = await fetch(req);
-      if (res.ok || res.type === 'opaque') c.put(req, res.clone());
+      const html = /text\/html/.test(res.headers.get('content-type') || '');
+      if ((res.ok && !(isModel && html)) || res.type === 'opaque') c.put(req, res.clone());
       return res;
     }));
     return;
   }
   if (url.origin === location.origin) {
     // App files: network first so updates arrive, cached copy when offline.
-    // cache: 'no-cache' asks GitHub every time whether the file changed (GitHub otherwise lets
+    // cache: 'no-cache' asks the server every time whether the file changed (the host otherwise lets
     // browsers reuse a copy for 10 minutes), so updates show on the next open
     const fresh = req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req, { cache: 'no-cache' });
     e.respondWith(fresh.then((res) => {

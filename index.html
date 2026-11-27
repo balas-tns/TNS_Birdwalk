@@ -186,11 +186,16 @@ body.big .rb,body.big .miclbl{font-size:18px}
 .qr svg{width:200px;height:200px}
 .qrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .qrs .qr svg{width:130px;height:130px}
-nav{flex:none;background:var(--sheet);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom));display:flex;justify-content:center}
+nav{flex:none;background:var(--sheet);border:0;padding:6px 8px calc(6px + env(safe-area-inset-bottom));display:flex;justify-content:center}
 nav .in{max-width:560px;width:100%;display:flex;justify-content:space-around}
 .navb{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:13px;color:var(--muted);min-width:96px;padding:6px 4px;border-radius:10px}
 .navb[aria-current=page]{color:var(--forest);font-weight:700}
-.navb[aria-current=page] svg{stroke-width:2.6}
+.navb[aria-current=page] svg .fi{fill:currentColor}
+.navb .fi{fill:none;transition:fill .15s}
+.navb:focus:not(:focus-visible),.iconbtn:focus:not(:focus-visible),button:focus:not(:focus-visible){outline:none}
+html{background:var(--sheet)}
+body.nonav nav{display:none}
+body.gate nav,body.gate .hdr-icons{display:none}
 .empty{text-align:center;padding:30px 10px;color:var(--muted)}
 .prog{height:10px;border-radius:5px;background:var(--panelRule);overflow:hidden}
 .prog i{display:block;height:10px;background:var(--turmeric);border-radius:5px}
@@ -258,6 +263,23 @@ details.more[open]{display:flex;flex-direction:column;gap:8px}
 .navrow:focus-visible{outline:3px solid var(--forest);outline-offset:-3px}
 .profile input{min-height:38px;padding:4px 10px;font-size:16px;border-width:1.5px}
 .profile label.f{font-size:12px;gap:2px}
+.vclog{margin:0;padding:10px 12px;background:var(--sheet);border:1px solid var(--line);border-radius:12px;font:12px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto;color:var(--ink)}
+.vcline{flex:none;margin:-4px 0 0;text-align:center;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* install-only page (opened in a browser tab) */
+main.gatepg{align-items:center;justify-content:center;text-align:center;gap:14px;padding:16px 24px 24px}
+.gicon{border-radius:24px;box-shadow:0 6px 20px rgba(21,71,52,.18)}
+.gatepg h1{font-size:24px;margin:0}
+.glead{margin:0;max-width:32ch;color:var(--ink)}
+.gatepg .btn{width:100%;max-width:320px}
+.gnote{margin:0;max-width:34ch;font-size:14px;color:var(--muted)}
+.gnote.ok{color:var(--ink);font-size:16px}
+.gsteps{margin:0;padding:12px 16px 12px 36px;text-align:left;background:var(--sheet);border:1px solid var(--line);border-radius:16px;max-width:340px;font-size:15px;line-height:1.5}
+.gfine{margin:0;max-width:34ch;font-size:12px;color:var(--muted)}
+/* microphone and location strip on Home */
+.permbar{all:unset;box-sizing:border-box;flex:none;cursor:pointer;display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:14px;background:var(--turmericBg);color:var(--turmericInk);border:1.5px solid var(--turmeric);font-size:13px}
+.permbar b{font-size:15px}
+.permbar.bad{cursor:default;background:var(--errBg);color:var(--errInk);border-color:var(--danger)}
+.permbar:focus-visible{outline:3px solid var(--forest);outline-offset:3px}
 /* short phones: drop the extras so Home and Walk still fit */
 @media (max-height:740px){.hero .trace,.tip{display:none}.hero{padding-bottom:12px}}
 /* auto-fit: app.js adds t1, t2, t3 to Home or Walk, one at a time, until nothing scrolls */
@@ -316,8 +338,8 @@ body.hc .btn.alt{border-width:3px}
 </div>
 <nav aria-label="Main">
   <div class="in">
-    <button class="navb" data-go="home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
-    <button class="navb" data-go="walk"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19c3-6 5-2 8-8s5-4 8-6"/><circle cx="4" cy="19" r="1.6"/><circle cx="20" cy="5" r="1.6"/></svg>Walk</button>
+    <button class="navb" data-go="home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="fi" d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+    <button class="navb" data-go="walk"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><g class="fi" transform="translate(-2.6 -2.4) scale(1.22)"><path d="M6.4 9.2c1.9 0 2.9 1.7 2.9 4.1 0 2.4-.9 3.9-2.5 3.9s-2.4-1.6-2.4-4c0-2.3.7-4 2-4z"/><path d="M4.6 19.2h4v.6a2 2 0 0 1-4 0z"/><path d="M17.6 3.2c1.3 0 2 1.7 2 4 0 2.4-.8 4-2.4 4s-2.5-1.5-2.5-3.9c0-2.4 1-4.1 2.9-4.1z"/><path d="M15.4 13.2h4v.6a2 2 0 0 1-4 0z"/></g></svg>Walk</button>
   </div>
 </nav>
 <dialog id="qrDlg" aria-labelledby="qrTitle">

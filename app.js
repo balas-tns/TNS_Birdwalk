@@ -2,7 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v23';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -228,6 +228,7 @@ $('#qrBtn').addEventListener('click', () => { drawQr(); $('#qrDlg').showModal();
 $('#qrClose').addEventListener('click', () => $('#qrDlg').close());
 $('#qrDlg').addEventListener('click', (e) => { if (e.target === $('#qrDlg')) $('#qrDlg').close(); });
 document.querySelectorAll('#qrDlg [data-q]').forEach((b) => b.addEventListener('click', () => { qrKind = b.dataset.q; drawQr(); }));
+const INSTALLED = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: minimal-ui)').matches || navigator.standalone === true || C.allowBrowser === true;
 function route() {
   const h = location.hash.slice(1) || 'home';
   if (h.startsWith('place-')) {
@@ -260,6 +261,7 @@ function route() {
   document.querySelectorAll('.navb').forEach((b) => b.setAttribute('aria-current', b.dataset.go === tab ? 'page' : 'false'));
   $('#profileBtn').setAttribute('aria-current', h.startsWith('profile') || h === 'more' ? 'page' : 'false');
   $('#profileBtn').setAttribute('aria-label', h.startsWith('profile') || h === 'more' ? 'Close profile' : 'Profile, settings and credits');
+  document.body.classList.toggle('nonav', h.startsWith('profile') || h === 'more');
   view.classList.toggle('fit', h === 'home' || (h === 'walk' && !!S.walk) || h.startsWith('results-'));
   if ((h === 'walk' || h === 'history') && !S.walk && S.recover) { location.replace('#home'); return; }   // an interrupted walk is offered on Home
   if (h === 'walk' || h === 'history') { if (S.walk) renderWalk(); else renderHistory(); }
@@ -306,43 +308,55 @@ const MOTIF = (() => {                     // a fixed song-like pattern for Home
 })();
 
 /* ---------- voice commands for blind and low-vision walkers ----------
-   "Hi TNS, let's walk" starts a walk; "TNS, let's stop" finishes it. Uses the phone's speech recognition
-   (Chrome on Android). Listening restarts by itself while voice commands are on. */
-const VOICE = { ok: !!(window.SpeechRecognition || window.webkitSpeechRecognition), rec: null, on: false, retry: 0, heard: '', err: '', lock: 0, last: 0 };
-/* Phones spell "TNS" many ways ("T N S", "tennis", "DNS", "TMS", "teen s"), and "let's" often comes back as "let" or "lets".
-   Everything is folded to plain words first so the commands match whichever way the phone wrote them. */
-function norm(t) {
-  return ' ' + t.toLowerCase().replace(/&/g, ' and ').replace(/['’]/g, '').replace(/[.,!?"\-]/g, ' ')
-    .replace(/\b(tea|tee|t) and (ess|s)\b/g, 'tns')
-    .replace(/\bt\s*n\s*s\b/g, 'tns')
-    .replace(/\b(tennis|tenis|tns|tnss|dns|tms|pns|tnc|tea ness|teen s|t ness|tienes)\b/g, 'tns')
-    .replace(/\s+/g, ' ').trim() + ' ';
+   Two short commands: "Start walk" starts a walk, "Stop walk" finishes it ("Walk status" reads the status).
+   Uses the phone's speech recognition (Chrome on Android). Listening restarts by itself while voice commands are on. */
+const VOICE = { ok: !!(window.SpeechRecognition || window.webkitSpeechRecognition), rec: null, on: false, retry: 0, heard: '', err: '', lock: 0, last: 0, log: [] };
+/* A short diary of what speech recognition did, shown in Profile → Settings → Voice commands, so a failure on a real phone can be seen */
+function vlog(msg) {
+  const t = new Date().toLocaleTimeString('en-IN', { hour12: false });
+  VOICE.log.push(t + '  ' + msg); if (VOICE.log.length > 40) VOICE.log.shift();
+  const el = $('#vcLog'); if (el) { el.textContent = VOICE.log.slice().reverse().join('\n'); }
 }
-const STOP_RX = /\b(let|lets|let us|lats|lads|its) (stop|finish|end)\b|\bstop\b|\bfinish\b|\bend (the |my )?walk\b/;
-const START_RX = /\b(let|lets|let us|lats|lads|its) (walk|start|go|begin)\b|\bstart\b|\bbegin\b/;
-function heardCommand(texts) {
-  if (Date.now() < VOICE.lock) return true;                 // one command at a time (interim and final results repeat it)
+/* Phones write the same words differently, and Indian English "walk" often comes back as "work" or "wok".
+   Both words of a command must be heard together, so ordinary talk ("let's stop here") never ends a walk. */
+function norm(t) { return ' ' + t.toLowerCase().replace(/['’]/g, '').replace(/[.,!?"\-]/g, ' ').replace(/\s+/g, ' ').trim() + ' '; }
+const WALK = '(walk|walks|work|works|wok|woke|wak|vok|vak|bok)';
+const START_RX = new RegExp('\\b(start|starts|stat|star|stard|begin) (the |a |my )?' + WALK + '\\b');
+const STOP_RX = new RegExp('\\b(stop|stops|stopped|stap|top|end|finish) (the |my )?' + WALK + '\\b');
+const STATUS_RX = new RegExp('\\b' + WALK + ' status\\b|\\bstatus\\b');
+function matchCommand(texts) {
   for (const raw of texts) {
     const t = norm(raw);
-    if (!/ tns /.test(t)) continue;                         // the wake word is required, so ordinary talk never stops a walk
-    const run = (fn) => { VOICE.lock = Date.now() + 4000; fn(); return true; };
-    if (STOP_RX.test(t)) return run(() => {                 // checked first: "stop the walk" also contains "walk"
-      if (!S.walk) speak('No walk is running.', true);
-      else { speak('Stopping the walk.', true); finishWalk(); }
-    });
-    if (START_RX.test(t)) return run(() => {
-      if (S.walk) speak('The walk is already running.', true);
-      else { speak('Starting the walk.', true); startWalk(); }
-    });
-    if (/status|how (far|long)/.test(t) && S.walk) return run(() => speak(walkStatus(true), true));
-    if (/repeat|again/.test(t) && lastSpeech) return run(() => speak(lastSpeech, true));
+    if (STOP_RX.test(t)) return 'stop';
+    if (START_RX.test(t)) return 'start';
+    if (STATUS_RX.test(t)) return 'status';
   }
-  return false;
+  return '';
+}
+function heardCommand(texts) {
+  if (Date.now() < VOICE.lock) return true;                 // one command at a time (interim and final results repeat it)
+  const c = matchCommand(texts);
+  if (!c) return false;
+  VOICE.lock = Date.now() + 4000;
+  if (c === 'stop') { if (!S.walk) speak('No walk is running.', true); else { speak('Finishing.', true); finishWalk(); } }
+  else if (c === 'start') { if (S.walk) speak('The walk is already running.', true); else { speak('Walk started.', true); startWalk(); } }
+  else if (c === 'status') { if (S.walk) speak(walkStatus(true), true); else speak('No walk is running.', true); }
+  return true;
+}
+function describeCommand(texts) { const c = matchCommand(texts); return c ? c.toUpperCase() + ' command' : ''; }
+async function voiceCheck() {
+  const ua = navigator.userAgent;
+  const browser = /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /EdgA|Edg\//.test(ua) ? 'Edge' : /Firefox|FxiOS/.test(ua) ? 'Firefox' : /CriOS/.test(ua) ? 'Chrome on iPhone' : /iPhone|iPad/.test(ua) ? 'Safari on iPhone' : /Chrome/.test(ua) ? 'Chrome' : 'unknown browser';
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  let mic = 'unknown';
+  try { mic = (await navigator.permissions.query({ name: 'microphone' })).state; } catch (e) {}
+  vlog('check: ' + browser + (standalone ? ', installed app' : ', browser tab') + ', speech recognition ' + (VOICE.ok ? 'available' : 'NOT available') + ', microphone permission ' + mic + ', ' + (navigator.onLine ? 'online' : 'OFFLINE') + ', voice commands ' + (S.settings.voiceCmd ? 'on' : 'off') + ', listener ' + (VOICE.on ? 'running' : 'not running'));
 }
 function voiceStatusText() {
   if (!S.settings.voiceCmd) return '';
   if (VOICE.err) return 'Voice commands paused: ' + VOICE.err;
-  return VOICE.heard ? 'Voice heard: “' + VOICE.heard + '”' : 'Say “TNS, let’s stop” to finish';
+  if (VOICE.heard) return (S.walk ? 'Voice heard: “' : 'Heard: “') + VOICE.heard + '”';
+  return S.walk ? 'Say “Stop walk” to finish' : 'Say “Start walk” to begin';
 }
 function showVoiceStatus() { const el = $('#vcStat'); if (el) el.textContent = voiceStatusText(); }
 function voiceListen() {
@@ -350,27 +364,55 @@ function voiceListen() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const r = VOICE.rec = new SR();
   r.lang = 'en-IN'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
+  r.onstart = () => { vlog('listening started'); };
+  r.onspeechstart = () => { vlog('speech detected'); };
   r.onresult = (e) => {
     VOICE.err = ''; VOICE.retry = 0;
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const alts = [...e.results[i]].map((a) => a.transcript);
       VOICE.heard = (alts[0] || '').trim().slice(-40);
+      if (e.results[i].isFinal) vlog('heard: "' + alts.join('" / "') + '" → ' + (describeCommand(alts) || 'not a command'));
       if (heardCommand(alts)) break;
     }
     showVoiceStatus();
   };
   r.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { S.settings.voiceCmd = false; saveSettings(); tell('Voice commands need microphone permission. Turn them on again and allow it.', true); refreshVoiceUi(); return; }
+    vlog('error: ' + e.error + (e.message ? ' (' + e.message + ')' : ''));
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      /* Some phones refuse to listen until the person has touched the screen once after opening the app.
+         Keep the setting on and start again on the next tap anywhere, instead of switching voice commands off. */
+      if (VOICE.blocked) return;
+      VOICE.err = 'tap anywhere on the screen to start listening'; VOICE.blocked = true; showVoiceStatus();
+      document.addEventListener('pointerdown', () => { VOICE.blocked = false; VOICE.err = ''; VOICE.retry = 0; voiceListen(); showVoiceStatus(); }, { once: true });
+      return;
+    }
     if (e.error === 'no-speech' || e.error === 'aborted') return;
     VOICE.err = e.error === 'network' ? 'no internet for speech recognition' : e.error === 'audio-capture' ? 'the microphone is busy' : e.error;
     showVoiceStatus();
   };
-  r.onend = () => { VOICE.on = false; VOICE.last = Date.now(); if (S.settings.voiceCmd) setTimeout(voiceListen, Math.min(400 + VOICE.retry * 300, 3000)); VOICE.retry++; };
-  try { r.start(); VOICE.on = true; } catch (e) { VOICE.on = false; }
+  r.onend = () => { vlog('listening ended'); VOICE.on = false; VOICE.last = Date.now(); if (S.settings.voiceCmd && !VOICE.blocked) setTimeout(voiceListen, Math.min(400 + VOICE.retry * 300, 3000)); VOICE.retry++; };
+  try { r.start(); VOICE.on = true; } catch (e) { VOICE.on = false; vlog('could not start: ' + e.message); }
+}
+async function voiceTest() {
+  await voiceCheck();
+  if (!VOICE.ok) return;
+  const wasOn = S.settings.voiceCmd; voiceStop();
+  try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); vlog('test: microphone OK'); }
+  catch (e) { vlog('test: microphone refused (' + e.name + ')'); }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const r = new SR(); r.lang = 'en-IN'; r.continuous = true; r.interimResults = false; r.maxAlternatives = 3;
+  r.onstart = () => vlog('test: listening, speak now');
+  r.onaudiostart = () => vlog('test: sound input opened');
+  r.onspeechstart = () => vlog('test: speech detected');
+  r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { const alts = [...e.results[i]].map((a) => a.transcript); vlog('test heard: "' + alts.join('" / "') + '" → ' + (describeCommand(alts) || 'not a command')); } };
+  r.onerror = (e) => vlog('test error: ' + e.error + (e.message ? ' (' + e.message + ')' : ''));
+  r.onend = () => { vlog('test: finished'); if (wasOn) { VOICE.retry = 0; setTimeout(voiceListen, 500); } };
+  try { r.start(); } catch (e) { vlog('test: could not start (' + e.message + ')'); }
+  setTimeout(() => { try { r.stop(); } catch (e) {} }, 10000);
 }
 /* Watchdog: phones end speech recognition quietly (silence, a call, the screen dimming, recording starting).
    Every 5 seconds, if commands are on and nothing is listening, start listening again. */
-setInterval(() => { if (S.settings.voiceCmd && VOICE.ok && !VOICE.on && Date.now() - VOICE.last > 2500) voiceListen(); }, 5000);
+setInterval(() => { if (S.settings.voiceCmd && VOICE.ok && !VOICE.on && !VOICE.blocked && Date.now() - VOICE.last > 2500) voiceListen(); }, 5000);
 /* Starting the bird recording can take the microphone away from speech recognition on some phones,
    so listening is restarted once the recording is running. */
 function voiceRebind() { if (!S.settings.voiceCmd || !VOICE.ok) return; voiceStop(); VOICE.retry = 0; setTimeout(voiceListen, 300); }
@@ -378,7 +420,7 @@ function voiceStop() { const r = VOICE.rec; VOICE.rec = null; VOICE.on = false; 
 function refreshVoiceUi() { const h = location.hash.slice(1) || 'home'; if (h === 'home') renderHome(); else if (h === 'walk' && S.walk) renderWalk(); else if (h.startsWith('profile')) renderMore(h); }
 function setVoiceCmd(on) {
   S.settings.voiceCmd = on; saveSettings(); VOICE.retry = 0;
-  if (on) { voiceListen(); speak(S.walk ? 'Voice commands on. Say TNS, let’s stop to finish the walk.' : 'Voice commands on. Say Hi TNS, let’s walk to start.', true); }
+  if (on) { voiceListen(); speak(S.walk ? 'Voice commands on. Say stop walk to finish.' : 'Voice commands on. Say start walk to begin.', true); }
   else { voiceStop(); speak('Voice commands off.', true); }
   refreshVoiceUi();
 }
@@ -424,10 +466,11 @@ function renderHome() {
       <button class="micbtn" id="start" aria-label="Start walk" ${S.route && S.model !== 'loading' && S.model !== 'error' ? '' : 'disabled'}><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg></button>
       <p class="miclbl" aria-hidden="true">${S.model === 'loading' ? 'Loading the bird model…' : S.model === 'error' ? 'The bird model could not load' : S.route ? 'Tap to start the walk' : 'Pick a place above'}</p>
     </div>
-    ${VOICE.ok ? `<button class="vcbtn${S.settings.voiceCmd ? ' on' : ''}" id="vcHome" aria-pressed="${!!S.settings.voiceCmd}">${ICON.mic}${S.settings.voiceCmd ? 'Listening for “Hi TNS, let’s walk”' : 'Turn on voice commands'}</button>` : ''}
-    <p class="tip">${S.settings.voice ? 'Spoken mode is on. Keep the phone in a shirt pocket or on a lanyard with the microphone facing out. It will tell you each new bird. Double-tap Say status at any time.' : 'Best between 6:00 and 8:30 am. Hold the phone out of your pocket, walk slowly, and stop for a minute every 200 m.'}</p>
+    ${VOICE.ok ? `<button class="vcbtn${S.settings.voiceCmd ? ' on' : ''}" id="vcHome" aria-pressed="${!!S.settings.voiceCmd}">${ICON.mic}${S.settings.voiceCmd ? 'Listening for “Start walk”' : 'Turn on voice commands'}</button>` : ''}${S.settings.voiceCmd ? `<p class="muted vcline" id="vcStat" aria-hidden="true">${esc(voiceStatusText())}</p>` : ''}
+    ${permNeeded() ? permHtml() : `<p class="tip">${S.settings.voice ? 'Spoken mode is on. Keep the phone in a shirt pocket or on a lanyard with the microphone facing out. It will tell you each new bird. Double-tap Say status at any time.' : 'Best between 6:00 and 8:30 am. Hold the phone out of your pocket, walk slowly, and stop for a minute every 200 m.'}</p>`}
     ${S.settings.voice ? '' : '<button class="linkish" id="a11yOn">Turn on spoken mode for blind and low-vision walkers</button>'}
-    ${S.deferredInstall ? '<button class="btn alt" id="install">Install the app on this phone</button>' : ''}`;
+`;
+  const pm = $('#perm'); if (pm) pm.addEventListener('click', askPermissions);
   view.querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => {
     S.route = b.dataset.route;
     const picked = allRoutes().find((x) => x.id === S.route);
@@ -448,10 +491,71 @@ function renderHome() {
   $('#wWalker').addEventListener('change', (e) => { S.settings.name = e.target.value.trim(); saveSettings(); });
   const rc = $('#recContinue'); if (rc) rc.addEventListener('click', () => startWalk(S.recover));
   const rf = $('#recFinish'); if (rf) rf.addEventListener('click', () => finishRecovered());
-  const ins = $('#install');
-  if (ins) ins.addEventListener('click', async () => { S.deferredInstall.prompt(); await S.deferredInstall.userChoice; S.deferredInstall = null; renderHome(); });
 }
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.deferredInstall = e; if (!location.hash || location.hash === '#home') renderHome(); });
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.deferredInstall = e; if (!INSTALLED) renderGate(); });
+window.addEventListener('appinstalled', () => { S.deferredInstall = null; S.justInstalled = true; if (!INSTALLED) renderGate(); });
+
+/* ---------- microphone and location permission ----------
+   A web app cannot skip the phone's own "Allow microphone / location?" questions; the browser always asks once.
+   What the app can do: ask both together, once, at a moment that makes sense, and explain how to fix a "Block". */
+S.perm = { mic: 'prompt', geo: 'prompt' };
+async function readPermissions() {
+  for (const [k, name] of [['mic', 'microphone'], ['geo', 'geolocation']]) {
+    try {
+      const st = await navigator.permissions.query({ name });
+      S.perm[k] = st.state;
+      st.onchange = () => { S.perm[k] = st.state; if ((location.hash || '#home') === '#home') renderHome(); };
+    } catch (e) { S.perm[k] = 'unknown'; }
+  }
+  if ((location.hash || '#home') === '#home' && INSTALLED) renderHome();
+}
+function permNeeded() { return S.perm.mic === 'prompt' || S.perm.geo === 'prompt' || S.perm.mic === 'denied' || S.perm.geo === 'denied'; }
+function permHtml() {
+  if (S.perm.mic === 'denied' || S.perm.geo === 'denied') {
+    const what = S.perm.mic === 'denied' && S.perm.geo === 'denied' ? 'microphone and location are' : S.perm.mic === 'denied' ? 'microphone is' : 'location is';
+    return `<div class="permbar bad" role="alert"><b>The ${what} blocked for this app.</b> Open Chrome, tap ⋮, then Settings › Site settings › ${S.perm.mic === 'denied' ? 'Microphone' : 'Location'}, find this app's address under Blocked and choose Allow. Then reopen the app.</div>`;
+  }
+  return `<button class="permbar" id="perm"><b>Allow microphone and location</b><span>Needed once, before your first walk. The phone will ask twice: tap Allow both times.</span></button>`;
+}
+async function askPermissions() {
+  try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); S.perm.mic = 'granted'; }
+  catch (e) { S.perm.mic = e.name === 'NotAllowedError' ? 'denied' : S.perm.mic; }
+  await new Promise((res) => navigator.geolocation.getCurrentPosition(() => { S.perm.geo = 'granted'; res(); }, (e) => { if (e.code === 1) S.perm.geo = 'denied'; res(); }, { enableHighAccuracy: true, timeout: 15000 }));
+  renderHome();
+  if (!permNeeded()) tell('Microphone and location are allowed. You are ready to walk.', true);
+}
+
+/* ---------- install-only page ----------
+   Opened in a browser tab (from a QR code or a link), the app shows only how to install it.
+   The full app runs only once installed and opened from the home screen. */
+function renderGate() {
+  document.body.classList.add('gate');
+  const base = location.origin + location.pathname;
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const inApp = /; wv\)|FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\//.test(ua);
+  const samsung = /SamsungBrowser/.test(ua);
+  const mobile = /Android|iPhone|iPad|iPod/.test(ua) || ios;
+  let how;
+  if (S.justInstalled) how = '<p class="gnote ok"><b>Installed.</b> Close this page and open <b>TNS Bird Walk</b> from your home screen.</p>';
+  else if (inApp) how = `<p class="gnote">This link opened inside another app, which cannot install apps. Tap <b>⋮</b> or <b>…</b> at the top and choose <b>Open in Chrome</b>${ios ? ' (on iPhone: Open in Safari)' : ''}, or copy the link and paste it into Chrome.</p><button class="btn alt" id="gCopy">Copy the link</button>`;
+  else if (S.deferredInstall) how = '<button class="btn" id="gInstall">Install TNS Bird Walk</button><p class="gnote">Free, about 1 MB now. The bird model (about 75 MB) downloads the first time you open the app, so use Wi-Fi if you can.</p>';
+  else if (ios) how = '<ol class="gsteps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (the square with an arrow).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>TNS Bird Walk</b> from your home screen.</li></ol>';
+  else if (samsung) how = '<ol class="gsteps"><li>Tap <b>☰</b> at the bottom right.</li><li>Tap <b>Add page to</b>, then <b>Home screen</b>.</li><li>Open <b>TNS Bird Walk</b> from your home screen.</li></ol>';
+  else if (mobile) how = '<ol class="gsteps"><li>Tap <b>⋮</b> at the top right of Chrome.</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>, then <b>Install</b>).</li><li>Open <b>TNS Bird Walk</b> from your home screen.</li></ol><p class="gnote">If the menu shows <b>Open app</b> instead, it is already installed: open it from your home screen.</p>';
+  else how = `<p class="gnote">TNS Bird Walk is a phone app. Scan this code with your phone's camera to install it.</p><div class="qr">${qrSvg(base, 6)}</div>`;
+  view.className = 'gatepg';
+  view.innerHTML = `
+    <img class="gicon" src="icons/icon-192.png" width="96" height="96" alt="">
+    <h1>TNS Bird Walk</h1>
+    <p class="glead">Record bird calls on your walk and find out which birds are around you. By Tirupati Nature Society.</p>
+    ${how}
+    <p class="gfine">When you start your first walk, the phone asks to use the microphone (to hear birds) and location (to map the walk). Tap Allow both times.</p>`;
+  const gi = $('#gInstall');
+  if (gi) gi.addEventListener('click', async () => { const d = S.deferredInstall; if (!d) return; d.prompt(); const c = await d.userChoice; if (c.outcome === 'accepted') { S.deferredInstall = null; S.justInstalled = true; } renderGate(); });
+  const gc = $('#gCopy');
+  if (gc) gc.addEventListener('click', async () => { try { await navigator.clipboard.writeText(base); gc.textContent = 'Link copied'; } catch (e) { gc.textContent = base; } });
+}
 
 /* ---------- walk ---------- */
 let audio = null, geoWatch = null, wakeLock = null, tick = null;
@@ -711,7 +815,7 @@ function renderWalk() {
   view.innerHTML = `
     <div class="walkhead">
       <div><h1>${w.routeName && w.routeName !== ANYWHERE.name ? esc(w.routeName) : w.active ? 'Walking' : 'Finishing'}</h1>${S.settings.voiceCmd ? `<p class="sub" id="vcStat" aria-hidden="true">${esc(voiceStatusText())}</p>` : ''}</div>
-      <div class="wh-r"><span class="live" id="live" aria-hidden="true"><i></i><span id="liveTxt">Listening</span></span>${VOICE.ok ? `<button class="vcbtn round${S.settings.voiceCmd ? ' on' : ''}" id="vcWalk" aria-pressed="${!!S.settings.voiceCmd}" aria-label="${S.settings.voiceCmd ? 'Voice commands are on. Say TNS, let’s stop to finish.' : 'Turn on voice commands'}">${ICON.mic}</button>` : ''}</div>
+      <div class="wh-r"><span class="live" id="live" aria-hidden="true"><i></i><span id="liveTxt">Listening</span></span>${VOICE.ok ? `<button class="vcbtn round${S.settings.voiceCmd ? ' on' : ''}" id="vcWalk" aria-pressed="${!!S.settings.voiceCmd}" aria-label="${S.settings.voiceCmd ? 'Voice commands are on. Say stop walk to finish.' : 'Turn on voice commands'}">${ICON.mic}</button>` : ''}</div>
     </div>
     <section class="panel" aria-hidden="true">
       <div class="lbl"><span>Sound, last 90 seconds</span><span id="gpsTxt">Waiting for GPS</span></div>
@@ -999,7 +1103,7 @@ function drawMap(el, track, species) {
 /* ---------- history ---------- */
 function renderHistory() {
   view.innerHTML = `<h1>Walks</h1>
-    <p class="muted">No walk is running. Tap the microphone on Home to start one${VOICE.ok && S.settings.voiceCmd ? ', or say “Hi TNS, let’s walk”' : ''}.</p>
+    <p class="muted">No walk is running. Tap the microphone on Home to start one${VOICE.ok && S.settings.voiceCmd ? ', or say “Start walk”' : ''}.</p>
     ${S.walks.length ? '<div class="list">' + S.walks.map((w) => `
       <button class="route" data-id="${esc(w.id)}" aria-label="${esc(w.routeName)}, ${esc(new Date(w.start).toLocaleString('en-IN', { day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }))}, ${w.km.toFixed(1)} kilometres, ${plural(w.species.length, 'species', 'species')}${w.demo ? ', demo' : ''}">
         <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="color:var(--forest)"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
@@ -1069,8 +1173,13 @@ async function renderMore(page) {
     </div></div>
     <div class="pfpage${on('profile-voice')}">
     <div class="group noprint">
-      ${VOICE.ok ? `<label class="toggle"><input type="checkbox" id="aVoiceCmd" ${S.settings.voiceCmd ? 'checked' : ''}><span>Start and stop the walk by voice<small>Say “Hi TNS, let’s walk” to start and “TNS, let’s stop” to finish. “TNS, status” and “TNS, repeat” also work. The phone keeps listening while this is on.</small></span></label>` : '<p class="muted">This phone’s browser does not offer speech recognition, so voice commands are not available. Chrome on Android does.</p>'}
-    </div></div>
+      ${VOICE.ok ? `<label class="toggle"><input type="checkbox" id="aVoiceCmd" ${S.settings.voiceCmd ? 'checked' : ''}><span>Start and stop the walk by voice<small>Say “Start walk” to start and “Stop walk” to finish. “Walk status” tells you the time, distance and birds so far. The phone keeps listening while this is on.</small></span></label>` : '<p class="muted">This phone’s browser does not offer speech recognition, so voice commands are not available. Chrome on Android does.</p>'}
+    </div>
+    <h2>Check voice commands</h2>
+    <p class="muted">Tap the button, then say “Start walk”. Nothing starts during the check. The list shows what the phone heard, newest first. If voice commands don’t work, send TNS a screenshot of this list.</p>
+    <button class="btn alt small" id="vcTest">Check now (10 seconds)</button>
+    <pre class="vclog" id="vcLog" aria-live="polite">${esc(VOICE.log.slice().reverse().join('\n') || 'Nothing recorded yet.')}</pre>
+    </div>
     <div class="pfpage${on('profile-walks')}">
     <div class="group noprint">
       <label class="toggle"><input type="checkbox" id="sClips" ${S.settings.sendClips ? 'checked' : ''}><span>Send sound clips to TNS<small>One 3-second clip per bird, so experts can check it. About 2 MB per walk. Human voices are never included.</small></span></label>
@@ -1111,6 +1220,7 @@ async function renderMore(page) {
   $('#print').addEventListener('click', () => window.print());
   $('#aTheme').addEventListener('change', (e) => { S.settings.theme = e.target.value; saveSettings(); announce('Style changed to ' + THEMES[e.target.value] + '.'); });
   const vc = $('#aVoiceCmd'); if (vc) vc.addEventListener('change', (e) => setVoiceCmd(e.target.checked));
+  const vt = $('#vcTest'); if (vt) vt.addEventListener('click', voiceTest);
   if (S.settings.every === 0) $('#aEvery').value = '0';
   const tg = (id, key, msg) => $(id).addEventListener('change', (e) => { S.settings[key] = e.target.checked; saveSettings(); announce(msg + (e.target.checked ? ' on.' : ' off.')); if (key === 'buzz' && e.target.checked) buzz([120, 80, 120]); });
   tg('#aVoice', 'voice', 'Spoken mode'); tg('#aBuzz', 'buzz', 'Vibration'); tg('#aBig', 'big', 'Larger text'); tg('#aHc', 'hc', 'High contrast'); tg('#aRepeat', 'repeat', 'Repeat birds');
@@ -1164,7 +1274,15 @@ function modelText() {
 /* ---------- start ---------- */
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 applyDisplay();
+if (!INSTALLED) {
+  /* QR codes for spoken mode or a place still work: their settings are saved now and used once the app is installed */
+  const gh = location.hash.slice(1);
+  if (gh === 'access' || gh.startsWith('access-')) { Object.assign(S.settings, { voice: true, buzz: true, big: true, voiceCmd: VOICE.ok }); saveSettings(); }
+  if (gh.startsWith('place-')) { try { const [n, ll] = decodeURIComponent(gh.slice(6)).split('~'); const [a, b] = (ll || '').split(',').map(Number); addPlace(n, isFinite(a) ? a : null, isFinite(b) ? b : null); } catch (e) {} }
+  renderGate();
+} else {
 loadNames(lang());
+readPermissions();
 if (S.settings.voiceCmd) voiceListen();
 S.recover = store.get(LIVE, null);
 if (S.recover && !(S.recover.track && S.recover.start)) { S.recover = null; clearCheckpoint(); }
@@ -1172,6 +1290,7 @@ setTimeout(() => { pruneClips(); retryClips(); }, 4000);
 if (S.recover) setTimeout(() => tell('Your walk was interrupted, but it was saved. Continue this walk, or finish and see the results.', true), 1200);
 startWorker();
 route();
+}
 }
 
 /* re-fit after any direct redraw of Home or Walk (voice toggle, install prompt, spoken mode) */

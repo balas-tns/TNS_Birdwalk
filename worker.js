@@ -35,13 +35,13 @@ async function init(config) {
 
   const txt = await (await mustFetch(cfg.model.labelsUrl)).text();
   labels = parseLabels(txt, cfg.model);
-  const buf = await (await mustFetch(cfg.model.audioModelUrl)).arrayBuffer();
+  const buf = await fetchModel(cfg.model.audioModelUrl);
   session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
 
   let geo = false;
   if (cfg.model.geoModelUrl) {
     try {
-      const gb = await (await mustFetch(cfg.model.geoModelUrl)).arrayBuffer();
+      const gb = await fetchModel(cfg.model.geoModelUrl);
       geoSession = await ort.InferenceSession.create(gb, { executionProviders: ['wasm'] });
       geo = true;
     } catch (err) { geoSession = null; }
@@ -52,6 +52,35 @@ async function init(config) {
   });
 }
 
+/* A model can be one file, or a list of parts that are joined back together here.
+   Parts let the ~70 MB audio model live on hosts that limit file size (Cloudflare Pages allows 25 MB per file).
+   If model/audio.onnx is missing, the parts model/audio.onnx.001, .002, … are used automatically,
+   so splitting the model needs no change to config.js. */
+async function fetchModel(url) {
+  let list = url;
+  if (!Array.isArray(url)) {
+    const isFile = (r) => r.ok && !/text\/html/.test(r.headers.get('content-type') || '');   // some hosts answer a missing file with the app page
+    const whole = await fetch(url);
+    if (isFile(whole)) return whole.arrayBuffer();
+    list = [];
+    for (let i = 1; i < 100; i++) {
+      const u = url + '.' + String(i).padStart(3, '0');
+      const r = await fetch(u);
+      if (!isFile(r)) break;
+      list.push(new Uint8Array(await r.arrayBuffer()));
+    }
+    if (!list.length) throw new Error('Could not load ' + url + ' (' + whole.status + ')');
+    return join(list);
+  }
+  const parts = [];
+  for (const u of list) parts.push(new Uint8Array(await (await mustFetch(u)).arrayBuffer()));
+  return join(parts);
+}
+function join(parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out.buffer;
+}
 async function mustFetch(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error('Could not load ' + url + ' (' + r.status + ')');
