@@ -2,7 +2,7 @@
 {
 'use strict';
 const C = window.TNS_CONFIG;
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -143,7 +143,9 @@ function applyDisplay() {
   const t = themeNow();
   if (t === 'forest') delete document.body.dataset.theme; else document.body.dataset.theme = t;
   const m = document.querySelector('meta[name=theme-color]');
-  if (m) m.setAttribute('content', getComputedStyle(document.body).getPropertyValue('--paper').trim() || '#154734');
+  const paper = getComputedStyle(document.body).getPropertyValue('--paper').trim() || '#FFFFFF';
+  if (m) m.setAttribute('content', paper);            // phone's top and bottom bars take the page colour, so no coloured strip shows
+  document.documentElement.style.background = paper;
 }
 const GCOL = { 'Birds': '#1565C0', 'Frogs & toads': '#2E7D32', 'Insects': '#9A5B00', 'Mammals': '#8A3B5C', 'Reptiles': '#6B5B2E' };
 const gdot = (g) => `<span class="gdot" style="--g:${GCOL[g] || '#555E68'}" aria-hidden="true"></span>`;
